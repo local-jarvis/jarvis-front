@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JARVIS Console</title>
+  <style>
+    :root {
+      --bg: #09090b;
+      --panel: #101216;
+      --panel2: #151821;
+      --panel3: #1b2332;
+      --line: #27272a;
+      --line2: #3f3f46;
+      --text: #e5e7eb;
+      --muted: #a1a1aa;
+      --muted2: #71717a;
+      --accent: #67e8a5;
+      --blue: #60a5fa;
+      --danger: #fb7185;
+      --font: Inter, Pretendard, SUIT, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --mono: "JetBrains Mono", Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      height: 100vh;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 20% 0%, rgba(96, 165, 250, .08), transparent 28rem),
+        radial-gradient(circle at 90% 100%, rgba(103, 232, 165, .055), transparent 24rem),
+        var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+    }
+
+    button, textarea { font: inherit; }
+
+    .app {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr) 58px;
+      height: 100vh;
+      border: 1px solid var(--line);
+      background: rgba(9, 9, 11, .74);
+    }
+
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--line);
+      background: rgba(16, 18, 22, .82);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 24px 20px 18px;
+    }
+
+    .logo {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #f4f4f5, #a1a1aa);
+      color: #09090b;
+      font-weight: 900;
+      letter-spacing: -.06em;
+    }
+
+    .brand-text strong {
+      display: block;
+      font-size: 24px;
+      letter-spacing: .04em;
+      font-weight: 680;
+    }
+
+    .brand-text span {
+      display: block;
+      margin-top: 3px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .section {
+      padding: 10px 16px 18px;
+    }
+
+    .section-title {
+      margin: 14px 4px 10px;
+      font-size: 12px;
+      color: var(--muted2);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    .nav {
+      display: grid;
+      gap: 6px;
+    }
+
+    .nav button,
+    .quick button,
+    .clear-btn {
+      width: 100%;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      text-align: left;
+      transition: .16s ease;
+    }
+
+    .nav button {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 11px 12px;
+      border-radius: 12px;
+      font-size: 14px;
+    }
+
+    .nav button:hover {
+      background: var(--panel2);
+      color: var(--text);
+    }
+
+    .nav button.active {
+      border-color: rgba(103, 232, 165, .35);
+      background: rgba(103, 232, 165, .08);
+      color: var(--text);
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+
+    .pill {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--accent);
+    }
+
+    .quick {
+      display: grid;
+      gap: 8px;
+    }
+
+    .quick button {
+      padding: 11px 12px;
+      border-radius: 12px;
+      background: rgba(21, 24, 33, .72);
+      font-size: 13px;
+    }
+
+    .quick button:hover {
+      border-color: var(--line2);
+      color: var(--text);
+      transform: translateY(-1px);
+    }
+
+    .clear-btn {
+      margin-top: 6px;
+      padding: 11px 12px;
+      border-radius: 12px;
+      border-color: var(--line);
+      font-size: 13px;
+      color: var(--text);
+      background: rgba(9, 9, 11, .38);
+    }
+
+    .clear-btn:hover {
+      border-color: var(--line2);
+      background: var(--panel2);
+    }
+
+    .server-card {
+      margin-top: auto;
+      border-top: 1px solid var(--line);
+      padding: 16px 18px;
+      background: rgba(9, 9, 11, .22);
+    }
+
+    .server-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin: 8px 0;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .server-row strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 18px rgba(103, 232, 165, .34);
+    }
+
+    .main {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      background: rgba(9, 9, 11, .45);
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      padding: 22px 28px 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(9, 9, 11, .36);
+    }
+
+    .topbar h1 {
+      margin: 0;
+      font-size: 25px;
+      letter-spacing: -.02em;
+    }
+
+    .topbar p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .small-badge {
+      border: 1px solid var(--line);
+      background: rgba(16, 18, 22, .82);
+      color: var(--muted);
+      padding: 8px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .small-badge strong {
+      color: var(--accent);
+      font-weight: 650;
+    }
+
+    .chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 26px 28px;
+    }
+
+    .notice {
+      margin: 0 auto 24px;
+      max-width: 680px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(16, 18, 22, .62);
+      padding: 13px 15px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .message {
+      display: flex;
+      margin-bottom: 26px;
+    }
+
+    .message.assistant { justify-content: flex-start; }
+    .message.user { justify-content: flex-end; }
+
+    .bubble-wrap {
+      max-width: min(720px, 72%);
+    }
+
+    .bubble {
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      padding: 14px 16px;
+      line-height: 1.65;
+      font-size: 14px;
+      box-shadow: 0 10px 28px rgba(0,0,0,.12);
+    }
+
+    .assistant .bubble {
+      background: var(--panel2);
+      color: #d4d4d8;
+      border-top-left-radius: 5px;
+    }
+
+    .user .bubble {
+      background: var(--panel3);
+      color: var(--text);
+      border-top-right-radius: 5px;
+    }
+
+    .meta {
+      margin-top: 8px;
+      color: var(--muted2);
+      font-size: 12px;
+      font-family: var(--mono);
+    }
+
+    .assistant .meta { text-align: left; }
+    .user .meta { text-align: right; }
+
+    .task-card {
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: rgba(9, 9, 11, .38);
+      padding: 12px;
+      font-size: 12px;
+      font-family: var(--mono);
+      color: var(--muted);
+    }
+
+    .task-card div {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 4px 0;
+    }
+
+    .task-card strong {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .composer {
+      padding: 16px 28px 22px;
+      border-top: 1px solid var(--line);
+      background: rgba(9, 9, 11, .54);
+    }
+
+    .suggestions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .suggestions button {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(16, 18, 22, .72);
+      color: var(--muted);
+      cursor: pointer;
+      padding: 7px 10px;
+      font-size: 12px;
+    }
+
+    .suggestions button:hover {
+      color: var(--text);
+      border-color: var(--line2);
+    }
+
+    .input-box {
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+      border: 1px solid var(--line2);
+      border-radius: 16px;
+      background: rgba(16, 18, 22, .9);
+      padding: 10px 10px 10px 14px;
+    }
+
+    textarea {
+      flex: 1;
+      min-height: 36px;
+      max-height: 120px;
+      resize: none;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text);
+      padding: 8px 0;
+      font-size: 14px;
+    }
+
+    textarea::placeholder {
+      color: var(--muted2);
+    }
+
+    .send {
+      border: 0;
+      border-radius: 12px;
+      background: var(--accent);
+      color: #052e1a;
+      cursor: pointer;
+      padding: 11px 16px;
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .send:hover {
+      filter: brightness(1.07);
+    }
+
+    .rail {
+      border-left: 1px solid var(--line);
+      background: rgba(16, 18, 22, .74);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px 0;
+      gap: 12px;
+    }
+
+    .rail button {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 18px;
+    }
+
+    .rail button:hover,
+    .rail button.active {
+      border-color: var(--line2);
+      background: var(--panel2);
+      color: var(--accent);
+    }
+
+    .rail-spacer { flex: 1; }
+
+    @media (max-width: 980px) {
+      .app {
+        grid-template-columns: 74px minmax(0, 1fr);
+      }
+
+      .sidebar {
+        align-items: center;
+      }
+
+      .brand-text,
+      .section,
+      .server-card .server-row,
+      .server-card .status span {
+        display: none;
+      }
+
+      .brand {
+        padding: 20px 0;
+      }
+
+      .server-card {
+        width: 100%;
+        display: grid;
+        place-items: center;
+      }
+
+      .rail {
+        display: none;
+      }
+
+      .bubble-wrap {
+        max-width: 88%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo">J</div>
+        <div class="brand-text">
+          <strong>JARVIS</strong>
+          <span>Memory-backed assistant</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Mode</div>
+        <nav class="nav">
+          <button class="active">
+            <span>Command Chat</span>
+            <span class="pill">LIVE</span>
+          </button>
+          <button>
+            <span>Reminders</span>
+            <span class="pill">03</span>
+          </button>
+          <button>
+            <span>Schedule</span>
+            <span class="pill">02</span>
+          </button>
+          <button>
+            <span>Memory</span>
+            <span class="pill">DB</span>
+          </button>
+          <button>
+            <span>Server</span>
+            <span class="pill">OK</span>
+          </button>
+        </nav>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Quick Actions</div>
+        <div class="quick">
+          <button>오늘 할 일 정리</button>
+          <button>리마인더 목록 보기</button>
+          <button>메모리 검색</button>
+          <button>서버 상태 확인</button>
+        </div>
+        <button class="clear-btn" id="clearBtn">Clear Screen</button>
+      </div>
+
+      <div class="server-card">
+        <div class="status">
+          <i class="dot"></i>
+          <span>Local Server Active</span>
+        </div>
+        <div class="server-row">
+          <span>Model</span>
+          <strong>Gemma 3 4B</strong>
+        </div>
+        <div class="server-row">
+          <span>Mode</span>
+          <strong>Stateless</strong>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>JARVIS Command Center</h1>
+          <p>Stateless Chat · Memory DB · Reminder Executor · Local Inference</p>
+        </div>
+        <div class="header-actions">
+          <div class="small-badge">Memory <strong>ON</strong></div>
+          <div class="small-badge">Server <strong>CONNECTED</strong></div>
+        </div>
+      </header>
+
+      <section class="chat" id="chat">
+        <div class="notice">
+          이 화면의 채팅 로그는 현재 브라우저 화면에서만 유지됩니다. 새로고침하거나 Clear Screen을 누르면 사라지고, 필요한 정보만 Memory DB / Reminder / Schedule에 저장됩니다.
+        </div>
+
+        <div class="message assistant">
+          <div class="bubble-wrap">
+            <div class="bubble">
+              안녕. 나는 대화 기록을 세션으로 저장하지 않고, 필요한 정보만 메모리와 작업 DB에 저장하는 방식으로 동작해.
+            </div>
+            <div class="meta">CHAT · RESPONSE · local</div>
+          </div>
+        </div>
+
+        <div class="message user">
+          <div class="bubble-wrap">
+            <div class="bubble">
+              내일 오후 3시에 과제하라고 알려줘
+            </div>
+            <div class="meta">USER · SENT · 15:00</div>
+          </div>
+        </div>
+
+        <div class="message assistant">
+          <div class="bubble-wrap">
+            <div class="bubble">
+              좋아. 내일 오후 3시에 “과제하기” 리마인더로 등록할 수 있어.
+              <div class="task-card">
+                <div><span>taskType</span><strong>REMINDER</strong></div>
+                <div><span>status</span><strong>READY_TO_SAVE</strong></div>
+                <div><span>remindAt</span><strong>2026-05-11 15:00</strong></div>
+              </div>
+            </div>
+            <div class="meta">REMINDER · READY · memory-not-required</div>
+          </div>
+        </div>
+      </section>
+
+      <footer class="composer">
+        <div class="suggestions">
+          <button>오늘 할 일 정리</button>
+          <button>30분 뒤에 쉬라고 알려줘</button>
+          <button>내 서버 상태 확인해줘</button>
+        </div>
+        <div class="input-box">
+          <textarea id="input" rows="1" placeholder="자비스에게 요청하기..."></textarea>
+          <button class="send" id="sendBtn">Send</button>
+        </div>
+      </footer>
+    </main>
+
+    <aside class="rail">
+      <button class="active" title="Task Details">⌁</button>
+      <button title="Upcoming Reminders">◴</button>
+      <button title="Model Status">▣</button>
+      <div class="rail-spacer"></div>
+      <button title="Settings">⚙</button>
+    </aside>
+  </div>
+
+  <script>
+    const chat = document.querySelector("#chat");
+    const input = document.querySelector("#input");
+    const sendBtn = document.querySelector("#sendBtn");
+    const clearBtn = document.querySelector("#clearBtn");
+
+    function nowTime() {
+      return new Date().toLocaleTimeString("ko-KR", {
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+    }
+
+    function addMessage(role, text, meta) {
+      const message = document.createElement("div");
+      message.className = `message ${role}`;
+
+      message.innerHTML = `
+        <div class="bubble-wrap">
+          <div class="bubble"></div>
+          <div class="meta">${meta}</div>
+        </div>
+      `;
+
+      message.querySelector(".bubble").textContent = text;
+      chat.appendChild(message);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function sendMessage() {
+      const text = input.value.trim();
+      if (!text) return;
+
+      addMessage("user", text, `USER · SENT · ${nowTime()}`);
+      input.value = "";
+      input.style.height = "auto";
+
+      setTimeout(() => {
+        addMessage(
+          "assistant",
+          "샘플 UI 응답이야. 실제 구현에서는 여기서 taskType을 분류하고, 필요한 경우 Reminder / Schedule / Memory DB에만 저장하면 돼.",
+          "CHAT · MOCK_RESPONSE · stateless"
+        );
+      }, 260);
+    }
+
+    sendBtn.addEventListener("click", sendMessage);
+
+    input.addEventListener("input", () => {
+      input.style.height = "auto";
+      input.style.height = `${input.scrollHeight}px`;
+    });
+
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        sendMessage();
+      }
+    });
+
+    clearBtn.addEventListener("click", () => {
+      chat.innerHTML = `
+        <div class="notice">
+          화면이 비워졌습니다. 채팅 세션은 저장되지 않으며, 필요한 정보만 Memory DB / Reminder / Schedule에 저장됩니다.
+        </div>
+      `;
+    });
+  </script>
+</body>
+</html>

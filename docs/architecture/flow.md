@@ -1,0 +1,160 @@
+# 흐름 문서 - jarvis-front
+
+주요 기능 흐름을 단계별로 기록한다.
+
+## Authentication Bootstrap
+- Actor: 사용자
+- Entry point: `jarvis-frontend/src/pages/ChatPage.tsx`
+- Preconditions: React 앱이 로드되어 있다.
+- Steps:
+  1. `ChatPage`가 `useChatPage`를 호출한다.
+  2. hook이 `localStorage`에 access token이 있는지 확인한다.
+  3. token이 없으면 `LoginView`를 렌더링한다.
+  4. token이 있으면 service가 `GET /api/v1/auth/me`를 호출한다.
+  5. 사용자 조회에 성공하면 hook이 chat sessions, reminders, schedules, memories, activity, Web Push public key를 병렬 조회한다.
+  6. 조회된 DTO를 ViewModel로 변환해 인증 워크스페이스를 렌더링한다.
+- Validation: token 없음은 로그인 필요 상태로 처리한다.
+- Empty state: 세션이 없으면 초기 assistant 안내 메시지를 표시한다.
+- Error state: `auth/me` 또는 초기 조회 실패 시 token을 제거하고 실패 메시지를 로그인 화면에 표시한다.
+- Permission behavior: backend 401은 unauthenticated로 취급한다.
+- Retry or recovery: 사용자가 다시 로그인한다.
+- Side effects: access token을 `localStorage`에서 읽거나 제거한다.
+- Related API: `GET /api/v1/auth/me`, workspace 초기 조회 API 전체
+- Related DB tables: 없음.
+
+## Login
+- Actor: 사용자
+- Entry point: `LoginView`
+- Preconditions: 사용자가 email/password를 알고 있다.
+- Steps:
+  1. 사용자가 email과 password를 입력한다.
+  2. `LoginView`가 submit intent를 hook에 전달한다.
+  3. hook이 빈 입력을 검증한다.
+  4. service가 `POST /api/v1/auth/login`을 호출한다.
+  5. service가 access token을 `localStorage`에 저장한다.
+  6. hook이 `GET /api/v1/auth/me` 및 workspace 초기 조회를 실행한다.
+- Validation: email/password trim 결과가 비어 있으면 API를 호출하지 않는다.
+- Empty state: 없음.
+- Error state: 400/401/500 실패 메시지를 login form error로 표시한다.
+- Permission behavior: login은 public이다.
+- Retry or recovery: 사용자가 값을 수정하고 다시 제출한다.
+- Side effects: access token 저장.
+- Related API: `POST /api/v1/auth/login`, `GET /api/v1/auth/me`
+- Related DB tables: 없음.
+
+## Chat Session And Message Flow
+- Actor: 사용자
+- Entry point: `ChatComposer`, `Sidebar`, `ChatHeader`
+- Preconditions: 사용자가 로그인되어 있다.
+- Steps:
+  1. hook이 `GET /api/v1/chat-sessions`로 세션 목록을 조회한다.
+  2. 사용자가 세션을 선택하면 hook이 `GET /api/v1/chat-sessions/{id}/messages`를 호출한다.
+  3. 사용자가 메시지를 제출하면 hook이 사용자 optimistic message와 pending assistant message를 추가한다.
+  4. 사용자가 textarea에서 Enter를 누르면 hook submit intent가 실행되고, Shift+Enter는 줄바꿈으로 처리한다.
+  5. service가 `POST /api/v1/chat`을 호출하고 응답을 assistant message로 변환한다.
+  6. 응답에 새 `sessionId`가 있으면 hook이 active session을 갱신하고 workspace를 다시 조회한다.
+  7. 사용자가 세션 제목을 저장하면 `PATCH /api/v1/chat-sessions/{id}`를 호출한다.
+  8. 사용자가 세션 보관을 선택하면 `DELETE /api/v1/chat-sessions/{id}`를 호출한다.
+- Validation: 메시지 trim 결과가 비어 있으면 API를 호출하지 않는다. Enter는 전송, Shift+Enter는 줄바꿈이다.
+- Empty state: 세션 또는 메시지가 없으면 안내 assistant message를 표시한다.
+- Error state: chat 실패 시 pending assistant message를 실패 메시지로 교체하고 system status를 `FAILED`로 표시한다.
+- Permission behavior: 모든 chat/session API는 authenticated이다.
+- Retry or recovery: 메시지를 다시 보내거나 세션을 다시 선택한다.
+- Side effects: React state의 optimistic message, backend chat session/message 저장.
+- Related API: chat session endpoints, `POST /api/v1/chat`
+- Related DB tables: 없음.
+
+## Reminder Management
+- Actor: 사용자
+- Entry point: `ReminderReviewView`
+- Preconditions: 사용자가 로그인되어 있다.
+- Steps:
+  1. 초기 workspace load에서 `GET /api/v1/reminders`로 pending 리마인더를 조회한다.
+  2. 사용자가 content와 remindAt을 입력하고 생성한다.
+  3. hook이 빈 입력을 검증한 뒤 service가 `POST /api/v1/reminders`를 호출한다.
+  4. 생성 후 hook이 reminders와 activity events를 다시 조회한다.
+  5. 사용자가 취소를 누르면 service가 `PATCH /api/v1/reminders/{id}/cancel`을 호출한다.
+- Validation: content와 remindAt이 비어 있으면 API를 호출하지 않는다.
+- Empty state: pending 리마인더가 없으면 빈 상태 문구를 표시한다.
+- Error state: 실패 시 system status를 `FAILED`로 표시한다.
+- Permission behavior: reminder API는 authenticated이다.
+- Retry or recovery: 사용자가 다시 생성/취소한다.
+- Side effects: backend reminder 생성 또는 취소.
+- Related API: `GET /api/v1/reminders`, `POST /api/v1/reminders`, `PATCH /api/v1/reminders/{id}/cancel`
+- Related DB tables: 없음.
+
+## Schedule Management
+- Actor: 사용자
+- Entry point: `ScheduleReviewView`
+- Preconditions: 사용자가 로그인되어 있다.
+- Steps:
+  1. 초기 workspace load에서 `GET /api/v1/schedules`를 호출한다.
+  2. 사용자가 from/to 필터를 입력하고 조회하면 query params와 함께 다시 조회한다.
+  3. 사용자가 제목과 시작 시각을 입력하고 저장하면 `POST /api/v1/schedules`를 호출한다.
+  4. 기존 일정을 수정 상태로 불러온 뒤 저장하면 `PATCH /api/v1/schedules/{id}`를 호출한다.
+  5. 삭제를 누르면 `DELETE /api/v1/schedules/{id}`를 호출한다.
+- Validation: title과 startAt이 비어 있으면 저장 API를 호출하지 않는다.
+- Empty state: 조회된 일정이 없으면 빈 상태 문구를 표시한다.
+- Error state: 실패 시 system status를 `FAILED`로 표시한다.
+- Permission behavior: schedule API는 authenticated이다.
+- Retry or recovery: 사용자가 form 값을 수정하고 다시 저장하거나 조회한다.
+- Side effects: backend schedule 생성/수정/삭제.
+- Related API: schedule endpoints
+- Related DB tables: 없음.
+
+## Memory Management
+- Actor: 사용자
+- Entry point: `MemoryReviewView`
+- Preconditions: 사용자가 로그인되어 있다.
+- Steps:
+  1. 초기 workspace load에서 `GET /api/v1/memories`를 호출한다.
+  2. 사용자가 내용을 입력하고 저장하면 `POST /api/v1/memories`를 호출한다.
+  3. 기존 memory를 수정 상태로 불러온 뒤 저장하면 `PATCH /api/v1/memories/{id}`를 호출한다.
+  4. 삭제를 누르면 `DELETE /api/v1/memories/{id}`를 호출한다.
+- Validation: content trim 결과가 비어 있으면 API를 호출하지 않는다.
+- Empty state: memory가 없으면 빈 상태 문구를 표시한다.
+- Error state: 실패 시 system status를 `FAILED`로 표시한다.
+- Permission behavior: memory API는 authenticated이다.
+- Retry or recovery: 사용자가 다시 저장한다.
+- Side effects: backend memory 생성/수정/soft delete.
+- Related API: memory endpoints
+- Related DB tables: 없음.
+
+## Activity Timeline
+- Actor: 사용자
+- Entry point: `ActivityTimelineView`
+- Preconditions: 사용자가 로그인되어 있다.
+- Steps:
+  1. 초기 workspace load에서 `GET /api/v1/activity-events?limit=50`을 호출한다.
+  2. 사용자가 새로고침을 누르면 같은 API를 다시 호출한다.
+  3. hook이 DTO를 timeline ViewModel로 변환한다.
+- Validation: limit은 현재 프론트에서 50으로 고정한다.
+- Empty state: activity가 없으면 빈 상태 문구를 표시한다.
+- Error state: 실패 시 system status를 `FAILED`로 표시한다.
+- Permission behavior: activity API는 authenticated이다.
+- Retry or recovery: 새로고침 버튼을 다시 누른다.
+- Side effects: 없음.
+- Related API: `GET /api/v1/activity-events`
+- Related DB tables: 없음.
+
+## Web Push Registration
+- Actor: 사용자
+- Entry point: `SettingsView`
+- Preconditions: 사용자가 로그인되어 있고 backend Web Push가 enabled이며 public key가 존재한다.
+- Steps:
+  1. 초기 workspace load에서 `GET /api/v1/web-push/public-key`를 호출한다.
+  2. public-key API가 실패하거나 비활성 응답이면 프론트 내장 fallback VAPID public key를 사용한다.
+  3. 사용자가 브라우저 등록을 누르면 hook이 browser notification permission을 확인한다.
+  4. permission이 default이면 `Notification.requestPermission()`을 호출한다.
+  5. hook이 `/web-push-sw.js` service worker를 등록한다.
+  6. 기존 PushSubscription의 application server key가 현재 key와 다르면 기존 구독을 해제한다.
+  7. hook이 `PushManager.subscribe`로 subscription을 얻는다.
+  8. service가 `POST /api/v1/web-push/subscriptions`로 endpoint, p256dh, auth를 저장한다.
+- Validation: public key 없음, browser API 미지원, permission 거부 시 저장 API를 호출하지 않는다.
+- Empty state: public-key API와 fallback key가 모두 없으면 등록 버튼을 비활성화한다.
+- Error state: 등록 실패 메시지를 Settings view에 표시하고 system status를 `FAILED`로 표시한다.
+- Permission behavior: public key 조회는 public, subscription 저장은 authenticated이다.
+- Retry or recovery: 브라우저 권한과 server 설정을 수정한 뒤 다시 등록한다.
+- Side effects: service worker 등록, browser PushSubscription 생성, backend subscription 저장.
+- Related API: `GET /api/v1/web-push/public-key`, `POST /api/v1/web-push/subscriptions`
+- Related DB tables: 없음.
