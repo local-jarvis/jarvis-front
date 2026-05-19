@@ -3,6 +3,7 @@ import type {
   ActivityEventResponseDto,
   AuthLoginRequestDto,
   AuthLoginResponseDto,
+  AuthRefreshRequestDto,
   AuthUserResponseDto,
   ChatMessageListQueryDto,
   ChatMessageResponseDto,
@@ -34,7 +35,16 @@ const FALLBACK_WEB_PUSH_PUBLIC_KEY =
   import.meta.env.VITE_JARVIS_WEB_PUSH_PUBLIC_KEY ??
   'BCFi-p-VQehvfXIKTSeaHgTsECNonwgjDJs79qw8UBKhKG65XRmNrOkARqCySmj4frYY-y6c7kis_TK65YpVOPk'
 
-const AUTH_TOKEN_STORAGE_KEY = 'jarvis.accessToken'
+const ACCESS_TOKEN_STORAGE_KEY = 'jarvis.accessToken'
+const REFRESH_TOKEN_STORAGE_KEY = 'jarvis.refreshToken'
+const ACCESS_TOKEN_EXPIRES_AT_STORAGE_KEY = 'jarvis.accessTokenExpiresAt'
+const REFRESH_TOKEN_EXPIRES_AT_STORAGE_KEY = 'jarvis.refreshTokenExpiresAt'
+const CHAT_REQUEST_TIMEOUT_MILLIS = 120_000
+const ACCESS_TOKEN_REFRESH_BUFFER_MILLIS = 60_000
+const FAILED_AUTH_REFRESH_RETRY_DELAY_MILLIS = 30_000
+
+let authRefreshPromise: Promise<AuthLoginResponseDto> | null = null
+let authRefreshTimerId: number | undefined
 
 /**
  * jarvis-back API 실패를 HTTP status와 함께 전달한다.
@@ -66,7 +76,21 @@ export function hasStoredAccessToken(): boolean {
 }
 
 /**
- * 로그인 성공 시 access token을 저장하고 사용자 정보를 반환한다.
+ * 앱이 열린 동안 access token 만료 전에 인증 세션을 갱신한다.
+ */
+export function startAuthSessionRefreshLoop(): void {
+  scheduleNextAuthRefresh()
+}
+
+/**
+ * 앱 lifecycle이 끝날 때 예약된 인증 refresh timer를 정리한다.
+ */
+export function stopAuthSessionRefreshLoop(): void {
+  clearScheduledAuthRefresh()
+}
+
+/**
+ * 로그인 성공 시 access/refresh token을 저장하고 사용자 정보를 반환한다.
  */
 export async function login(
   request: AuthLoginRequestDto,
@@ -77,13 +101,14 @@ export async function login(
     skipAuth: true,
   })
 
-  writeStoredAccessToken(response.accessToken)
+  writeStoredAuthTokens(response)
 
   return response
 }
 
 /**
  * 저장된 access token을 이용해 현재 사용자 정보를 조회한다.
+ * access token이 만료되었으면 refresh token으로 갱신한 뒤 재시도한다.
  */
 export async function fetchCurrentUser(): Promise<AuthUserResponseDto> {
   return fetchJson<AuthUserResponseDto>('/api/v1/auth/me')
@@ -93,7 +118,7 @@ export async function fetchCurrentUser(): Promise<AuthUserResponseDto> {
  * 프론트 저장소의 인증 토큰을 제거한다.
  */
 export function logout(): void {
-  clearStoredAccessToken()
+  clearStoredAuthTokens()
 }
 
 /**
@@ -129,9 +154,9 @@ export async function updateChatSession(
 }
 
 /**
- * 현재 사용자가 소유한 채팅 세션을 archived 상태로 전환한다.
+ * 현재 사용자가 소유한 채팅 세션과 세션 메시지를 삭제한다.
  */
-export async function archiveChatSession(sessionId: number): Promise<void> {
+export async function deleteChatSession(sessionId: number): Promise<void> {
   await fetchJson<void>(`/api/v1/chat-sessions/${sessionId}`, {
     method: 'DELETE',
   })
@@ -163,6 +188,7 @@ export async function sendChatMessage(
   return fetchJson<ChatResponseDto>('/api/v1/chat', {
     method: 'POST',
     body: JSON.stringify(request),
+    timeoutMillis: CHAT_REQUEST_TIMEOUT_MILLIS,
   })
 }
 
@@ -342,13 +368,20 @@ export async function saveWebPushSubscription(
 
 type FetchJsonInit = RequestInit & {
   skipAuth?: boolean
+  skipRefresh?: boolean
+  timeoutMillis?: number
 }
 
 async function fetchJson<TResponse>(
   path: string,
   init: FetchJsonInit = {},
 ): Promise<TResponse> {
-  const response = await fetchWithAuth(path, init)
+  let response = await fetchWithAuth(path, init)
+
+  if (response.status === 401 && shouldRefreshAuthSession(init)) {
+    await refreshStoredAuthSession()
+    response = await fetchWithAuth(path, init)
+  }
 
   if (!response.ok) {
     throw await createApiError(response)
@@ -365,15 +398,18 @@ async function fetchWithAuth(
   path: string,
   init: FetchJsonInit = {},
 ): Promise<Response> {
-  const headers = new Headers(init.headers)
+  const { skipAuth, timeoutMillis, ...requestInit } = init
+  const headers = new Headers(requestInit.headers)
 
   headers.set('Accept', 'application/json')
 
-  if (init.body) {
+  if (requestInit.body) {
     headers.set('Content-Type', 'application/json')
   }
 
-  if (!init.skipAuth) {
+  if (!skipAuth) {
+    await refreshAccessTokenIfNeeded()
+
     const accessToken = readStoredAccessToken()
 
     if (accessToken) {
@@ -381,10 +417,97 @@ async function fetchWithAuth(
     }
   }
 
-  return fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers,
-  })
+  const timeoutController =
+    timeoutMillis !== undefined ? new AbortController() : null
+  const timeoutId =
+    timeoutController && timeoutMillis !== undefined && timeoutMillis > 0
+      ? window.setTimeout(() => timeoutController.abort(), timeoutMillis)
+      : undefined
+
+  try {
+    return await fetch(`${API_BASE_URL}${path}`, {
+      ...requestInit,
+      headers,
+      signal: requestInit.signal ?? timeoutController?.signal,
+    })
+  } catch (error) {
+    if (timeoutController?.signal.aborted && timeoutMillis !== undefined) {
+      throw new Error(`API request timed out after ${timeoutMillis / 1000}s.`, {
+        cause: error,
+      })
+    }
+
+    throw error
+  } finally {
+    if (timeoutId !== undefined) {
+      window.clearTimeout(timeoutId)
+    }
+  }
+}
+
+function shouldRefreshAuthSession(init: FetchJsonInit): boolean {
+  return !init.skipAuth && !init.skipRefresh && readStoredRefreshToken() !== null
+}
+
+async function refreshAccessTokenIfNeeded(): Promise<void> {
+  if (!readStoredAccessToken() || !readStoredRefreshToken()) {
+    return
+  }
+
+  const accessTokenExpiresAt = readStoredTimestamp(
+    ACCESS_TOKEN_EXPIRES_AT_STORAGE_KEY,
+  )
+
+  if (accessTokenExpiresAt === null) {
+    return
+  }
+
+  if (accessTokenExpiresAt - Date.now() > ACCESS_TOKEN_REFRESH_BUFFER_MILLIS) {
+    return
+  }
+
+  await refreshStoredAuthSession()
+}
+
+async function refreshStoredAuthSession(): Promise<AuthLoginResponseDto> {
+  const refreshToken = readStoredRefreshToken()
+
+  if (!refreshToken) {
+    throw new Error('저장된 refresh token이 없습니다.')
+  }
+
+  if (isStoredRefreshTokenExpired()) {
+    clearStoredAuthTokens()
+    throw new Error('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.')
+  }
+
+  if (!authRefreshPromise) {
+    const request: AuthRefreshRequestDto = { refreshToken }
+
+    authRefreshPromise = fetchJson<AuthLoginResponseDto>('/api/v1/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify(request),
+      skipAuth: true,
+      skipRefresh: true,
+    })
+      .then((response) => {
+        writeStoredAuthTokens(response)
+
+        return response
+      })
+      .catch((error: unknown) => {
+        if (shouldClearStoredAuthAfterRefreshFailure(error)) {
+          clearStoredAuthTokens()
+        }
+
+        throw error
+      })
+      .finally(() => {
+        authRefreshPromise = null
+      })
+  }
+
+  return authRefreshPromise
 }
 
 async function createApiError(response: Response): Promise<JarvisApiError> {
@@ -399,7 +522,7 @@ async function createApiError(response: Response): Promise<JarvisApiError> {
   const message = extractErrorMessage(responseBody, response.status)
 
   if (response.status === 401) {
-    clearStoredAccessToken()
+    clearStoredAuthTokens()
   }
 
   return new JarvisApiError(message, response.status, responseBody)
@@ -459,19 +582,136 @@ function createFallbackWebPushPublicKeyResponse(): WebPushPublicKeyResponseDto {
 
 function readStoredAccessToken(): string | null {
   try {
-    return window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)
+    return window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY)
   } catch {
     return null
   }
 }
 
-function writeStoredAccessToken(accessToken: string): void {
-  window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, accessToken)
+function readStoredRefreshToken(): string | null {
+  try {
+    return window.localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY)
+  } catch {
+    return null
+  }
 }
 
-function clearStoredAccessToken(): void {
+function readStoredTimestamp(key: string): number | null {
   try {
-    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
+    const value = window.localStorage.getItem(key)
+
+    if (!value) {
+      return null
+    }
+
+    const timestamp = Number(value)
+
+    return Number.isFinite(timestamp) ? timestamp : null
+  } catch {
+    return null
+  }
+}
+
+function writeStoredAuthTokens(response: AuthLoginResponseDto): void {
+  const now = Date.now()
+
+  window.localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, response.accessToken)
+  window.localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, response.refreshToken)
+  window.localStorage.setItem(
+    ACCESS_TOKEN_EXPIRES_AT_STORAGE_KEY,
+    String(now + response.expiresIn * 1000),
+  )
+  window.localStorage.setItem(
+    REFRESH_TOKEN_EXPIRES_AT_STORAGE_KEY,
+    String(now + response.refreshExpiresIn * 1000),
+  )
+
+  scheduleNextAuthRefresh()
+}
+
+function isStoredRefreshTokenExpired(): boolean {
+  const refreshTokenExpiresAt = readStoredTimestamp(
+    REFRESH_TOKEN_EXPIRES_AT_STORAGE_KEY,
+  )
+
+  return refreshTokenExpiresAt !== null && refreshTokenExpiresAt <= Date.now()
+}
+
+function shouldClearStoredAuthAfterRefreshFailure(error: unknown): boolean {
+  return (
+    error instanceof JarvisApiError &&
+    (error.status === 400 || error.status === 401 || error.status === 404)
+  )
+}
+
+function scheduleNextAuthRefresh(): void {
+  clearScheduledAuthRefresh()
+
+  if (!readStoredAccessToken() || !readStoredRefreshToken()) {
+    return
+  }
+
+  if (isStoredRefreshTokenExpired()) {
+    clearStoredAuthTokens()
+    return
+  }
+
+  const accessTokenExpiresAt = readStoredTimestamp(
+    ACCESS_TOKEN_EXPIRES_AT_STORAGE_KEY,
+  )
+
+  if (accessTokenExpiresAt === null) {
+    return
+  }
+
+  const refreshDelayMillis = Math.max(
+    accessTokenExpiresAt - Date.now() - ACCESS_TOKEN_REFRESH_BUFFER_MILLIS,
+    0,
+  )
+
+  authRefreshTimerId = window.setTimeout(
+    refreshStoredAuthSessionInBackground,
+    refreshDelayMillis,
+  )
+}
+
+function scheduleAuthRefreshRetry(): void {
+  clearScheduledAuthRefresh()
+
+  if (!readStoredRefreshToken() || isStoredRefreshTokenExpired()) {
+    return
+  }
+
+  authRefreshTimerId = window.setTimeout(
+    refreshStoredAuthSessionInBackground,
+    FAILED_AUTH_REFRESH_RETRY_DELAY_MILLIS,
+  )
+}
+
+function refreshStoredAuthSessionInBackground(): void {
+  void refreshStoredAuthSession().catch((error: unknown) => {
+    if (!shouldClearStoredAuthAfterRefreshFailure(error)) {
+      scheduleAuthRefreshRetry()
+    }
+  })
+}
+
+function clearScheduledAuthRefresh(): void {
+  if (authRefreshTimerId === undefined) {
+    return
+  }
+
+  window.clearTimeout(authRefreshTimerId)
+  authRefreshTimerId = undefined
+}
+
+function clearStoredAuthTokens(): void {
+  try {
+    clearScheduledAuthRefresh()
+    window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY)
+    window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY)
+    window.localStorage.removeItem(ACCESS_TOKEN_EXPIRES_AT_STORAGE_KEY)
+    window.localStorage.removeItem(REFRESH_TOKEN_EXPIRES_AT_STORAGE_KEY)
   } catch {
     return
   }

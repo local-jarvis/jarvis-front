@@ -12,7 +12,7 @@ interface SidebarProps {
   sessions: ChatSessionViewModel[]
   systemStatus: SystemStatusViewModel
   user: AuthUserViewModel
-  onArchiveSession: (sessionId: string) => Promise<void>
+  onDeleteSession: (sessionId: string) => Promise<void>
   onCreateSession: () => Promise<void>
   onLogout: () => void
   onSessionSelect: (sessionId: string) => Promise<void>
@@ -38,7 +38,7 @@ export function Sidebar({
   sessions,
   systemStatus,
   user,
-  onArchiveSession,
+  onDeleteSession,
   onCreateSession,
   onLogout,
   onSessionSelect,
@@ -99,12 +99,12 @@ export function Sidebar({
                   <span>{session.lastMessageAtLabel || session.createdAtLabel}</span>
                 </button>
                 <button
-                  aria-label={`${session.title} 보관`}
+                  aria-label={`${session.title} 삭제`}
                   disabled={isBusy}
-                  onClick={() => void onArchiveSession(session.id)}
+                  onClick={() => void onDeleteSession(session.id)}
                   type="button"
                 >
-                  보관
+                  삭제
                 </button>
               </article>
             ))

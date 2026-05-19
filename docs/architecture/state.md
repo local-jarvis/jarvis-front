@@ -5,7 +5,11 @@
 ## 상태 종류
 | State | Owner | Source of Truth | Persisted | Notes |
 | --- | --- | --- | --- | --- |
-| `accessToken` | `jarvisApiService` | `POST /api/v1/auth/login` response | Yes, localStorage | 보호 API Authorization header에 사용 |
+| `accessToken` | `jarvisApiService` | `POST /api/v1/auth/login` 또는 `POST /api/v1/auth/refresh` response | Yes, localStorage | 보호 API Authorization header에 사용 |
+| `refreshToken` | `jarvisApiService` | `POST /api/v1/auth/login` 또는 `POST /api/v1/auth/refresh` response | Yes, localStorage | access token 갱신 request body에 사용 |
+| `accessTokenExpiresAt` | `jarvisApiService` | token response `expiresIn` 계산값 | Yes, localStorage | 만료 60초 전 선제 refresh 판단에 사용 |
+| `refreshTokenExpiresAt` | `jarvisApiService` | token response `refreshExpiresIn` 계산값 | Yes, localStorage | refresh token 로컬 만료 판단에 사용 |
+| `authRefreshTimer` | `jarvisApiService` | access token expiry metadata | No | 앱이 열린 동안 access token 만료 60초 전 refresh 예약 |
 | `user` | `useChatPage` | `GET /api/v1/auth/me` | No | 로그인 여부 판단 |
 | `loginForm` | `useChatPage` | LoginView input | No | email, password, error, submitting |
 | `activeView` | `useChatPage` | sidebar navigation event | No | `chat`, `reminders`, `schedules`, `memories`, `activity`, `settings` |
@@ -64,16 +68,22 @@
 | --- | --- | --- | --- | --- |
 | no token | login form | app bootstrap | token 없음 | 없음 |
 | stored token | authenticated workspace | `GET /auth/me` 성공 | token 유효 | workspace 초기 API 조회 |
+| stored token | scheduled refresh pending | app bootstrap 또는 token 저장 | accessTokenExpiresAt 존재 | 만료 60초 전 refresh timer 예약 |
+| stored access token near expiry | refreshed stored token | protected API 호출 전 | refreshToken 존재 및 미만료 | `POST /auth/refresh`, 새 access/refresh token 저장 |
+| scheduled refresh pending | refreshed stored token | refresh timer 실행 | refreshToken 존재 및 미만료 | `POST /auth/refresh`, 새 access/refresh token 저장, 다음 timer 예약 |
+| refresh timer failed | refresh retry scheduled | 일시적 refresh 실패 | 400/401/404가 아닌 오류 | 30초 뒤 background refresh 재시도 |
+| protected API 401 | refreshed stored token | API 401 응답 | refreshToken 존재 및 미만료 | `POST /auth/refresh`, 원 요청 1회 재시도 |
 | stored token | login form with error | `GET /auth/me` 실패 | 401 또는 API 실패 | token 제거 |
+| stored refresh token | login form with error | refresh 실패 또는 refresh token 만료 | 400/401/404 또는 로컬 만료 시각 초과 | access/refresh token 제거 |
 | login form | authenticated workspace | `POST /auth/login` 성공 | email/password non-empty | token 저장, workspace 초기 API 조회 |
-| authenticated workspace | login form | 로그아웃 클릭 | 없음 | token 제거, React state 초기화 |
+| authenticated workspace | login form | 로그아웃 클릭 | 없음 | token과 refresh timer 제거, React state 초기화 |
 | `activeView` any | selected view | sidebar click | 없음 | 중앙 작업 영역 교체 |
 | `activeSessionId` empty | new backend session id | chat response | backend가 sessionId 반환 | sessions/messages reload |
 | messages ready | optimistic user + pending assistant | chat submit or Enter key | message trim non-empty | `POST /api/v1/chat` 호출 |
 | pending assistant | completed assistant | JSON response | pending id 일치 | classification 갱신, workspace reload |
 | pending assistant | failed assistant | chat error | pending id 일치 | systemStatus FAILED |
 | session title draft | persisted title | title save | activeSessionId 존재 | `PATCH /chat-sessions/{id}` |
-| active session | archived session removed | archive click | sessionId 존재 | `DELETE /chat-sessions/{id}`, sessions reload |
+| active session | deleted session removed | delete click | sessionId 존재 | `DELETE /chat-sessions/{id}`, sessions/messages reload |
 | reminder form | reminder list updated | create reminder | content/remindAt non-empty | `POST /reminders`, reminders/activity reload |
 | pending reminder | reminder list updated | cancel reminder | status PENDING | `PATCH /reminders/{id}/cancel`, reminders reload |
 | schedule form | schedules updated | save schedule | title/startAt non-empty | POST or PATCH schedule, schedules reload |
@@ -84,6 +94,13 @@
 
 ## 인증 상태
 - access token은 `jarvis.accessToken` key로 `localStorage`에 저장한다.
-- refresh token 계약은 없다.
+- refresh token은 `jarvis.refreshToken` key로 `localStorage`에 저장한다.
+- access token 만료 시각은 `jarvis.accessTokenExpiresAt` key로 millisecond timestamp를 저장한다.
+- refresh token 만료 시각은 `jarvis.refreshTokenExpiresAt` key로 millisecond timestamp를 저장한다.
+- refresh token은 `Authorization` header로 보내지 않고 `POST /api/v1/auth/refresh` request body로만 보낸다.
+- 앱 bootstrap과 token 저장 시 service가 access token 만료 60초 전 refresh timer를 예약한다.
+- access token 만료 시각이 60초 이내이면 service가 보호 API 호출 전에 선제 refresh한다.
+- 보호 API가 401을 반환하면 service가 refresh token으로 인증 세션을 갱신한 뒤 원 요청을 1회 재시도한다.
+- background refresh가 일시 오류로 실패하면 30초 뒤 재시도하고, 400/401/404는 인증 실패로 보고 token을 제거한다.
 - role/admin 권한 상태는 없다.
 - 모든 보호 API는 backend의 사용자 소유권 검사를 신뢰한다.

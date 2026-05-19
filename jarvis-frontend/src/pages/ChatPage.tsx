@@ -42,8 +42,8 @@ export function ChatPage() {
         sessions={chatPage.sessions}
         systemStatus={chatPage.systemStatus}
         user={chatPage.user}
-        onArchiveSession={chatPage.handleArchiveSession}
         onCreateSession={chatPage.handleCreateSession}
+        onDeleteSession={chatPage.handleDeleteSession}
         onLogout={chatPage.handleLogout}
         onSessionSelect={chatPage.handleSessionSelect}
         onViewSelect={chatPage.handleViewSelect}

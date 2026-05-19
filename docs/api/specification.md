@@ -3,10 +3,12 @@
 이 문서는 프론트엔드가 소비하는 `jarvis-back` API 계약을 기록한다. 기본 backend host는 `http://localhost:8011`이며, `VITE_JARVIS_API_BASE_URL`로 대체할 수 있다. 보호 API에는 `Authorization: Bearer {accessToken}` header를 보낸다.
 
 ## 공통 인증
-- `POST /api/v1/auth/login`, `GET /api/v1/web-push/public-key`는 public이다.
+- `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`, `GET /api/v1/web-push/public-key`는 public이다.
 - 그 외 endpoint는 authenticated이다.
 - 인증 실패는 HTTP 401과 `ChatResponseDTO(status=FAILED)` 형태로 반환될 수 있다.
-- 프론트엔드는 401 응답을 받으면 저장된 access token을 제거한다.
+- 프론트엔드는 access token 만료 시 저장된 refresh token으로 `POST /api/v1/auth/refresh`를 호출하고 원 요청을 1회 재시도한다.
+- refresh token은 `Authorization` header에 넣지 않으며, request body로만 전송한다.
+- refresh 실패 또는 재시도 후 401 응답을 받으면 저장된 access/refresh token을 제거한다.
 - Web Push public key API가 비활성 또는 실패 상태면 프론트는 내장 fallback VAPID public key를 사용해 브라우저 구독을 생성한다.
 
 ## 공통 Enum
@@ -114,11 +116,37 @@
 | `accessToken` | string | yes | no | Bearer token 값 |
 | `tokenType` | string | yes | no | 항상 `Bearer` |
 | `expiresIn` | number | yes | no | token 만료까지 초 단위 |
+| `refreshToken` | string | yes | no | access token 갱신에 사용하는 refresh token 값 |
+| `refreshExpiresIn` | number | yes | no | refresh token 만료까지 초 단위 |
 | `user.id` | number | yes | no | 사용자 식별자 |
 | `user.email` | string | yes | no | 사용자 email |
 
 - Status codes: 200, 400, 401
 - Error cases: validation 실패, email 없음, 비밀번호 불일치
+
+### POST `/api/v1/auth/refresh`
+- 설명: 저장된 refresh token을 검증하고 새 JWT access token과 refresh token을 발급한다.
+- 인증: public
+- Request body:
+
+| Field | Type | Required | Nullable | Meaning |
+| --- | --- | --- | --- | --- |
+| `refreshToken` | string | yes | no | login 또는 refresh 응답에서 받은 refresh token |
+
+- Response body: `AuthLoginResponseDTO`
+
+| Field | Type | Required | Nullable | Meaning |
+| --- | --- | --- | --- | --- |
+| `accessToken` | string | yes | no | 새 Bearer access token 값 |
+| `tokenType` | string | yes | no | 항상 `Bearer` |
+| `expiresIn` | number | yes | no | 새 access token 만료까지 초 단위 |
+| `refreshToken` | string | yes | no | 새 refresh token 값 |
+| `refreshExpiresIn` | number | yes | no | 새 refresh token 만료까지 초 단위 |
+| `user.id` | number | yes | no | 사용자 식별자 |
+| `user.email` | string | yes | no | 사용자 email |
+
+- Status codes: 200, 400, 401, 404
+- Error cases: refresh token validation 실패, refresh token 만료/위조, access token 제출, token 사용자 없음
 
 ### GET `/api/v1/auth/me`
 - 설명: 현재 Bearer token의 사용자 정보를 조회한다.
@@ -184,12 +212,17 @@
 - Error cases: validation 실패, 인증 실패, 소유 세션 없음, 서버 오류
 
 ### DELETE `/api/v1/chat-sessions/{id}`
-- 설명: 현재 사용자가 소유한 채팅 세션을 archived 상태로 전환한다.
+- 설명: 현재 사용자가 소유한 채팅 세션과 세션 내부 메시지를 삭제한다.
 - 인증: authenticated
 - Path params: `id`
 - Response body: 없음
 - Status codes: 204, 401, 404, 500
 - Error cases: 인증 실패, 소유 세션 없음, 서버 오류
+- 동작:
+  - 현재 사용자 소유 세션인지 먼저 확인한다.
+  - 해당 세션의 `chat_messages` row를 먼저 삭제한 뒤 `chat_sessions` row를 삭제한다.
+  - 세션에서 자연어 작업으로 생성된 `user_memories`, `schedules`, `reminders` row는 삭제하지 않는다.
+  - 소유하지 않은 세션은 존재 여부를 노출하지 않기 위해 404로 처리한다.
 
 ### GET `/api/v1/chat-sessions/{id}/messages`
 - 설명: 현재 사용자가 소유한 채팅 세션 메시지를 createdAt 오름차순으로 조회한다.
@@ -209,6 +242,7 @@
 ### POST `/api/v1/chat`
 - 설명: 사용자 메시지를 LLM으로 분류한 뒤 현재 사용자 범위에서 실행한다.
 - 인증: authenticated
+- Frontend timeout: 프론트엔드는 LLM 응답 대기 시간을 120초로 제한한다.
 - Request body:
 
 | Field | Type | Required | Nullable | Meaning |
@@ -218,7 +252,7 @@
 
 - Response body: `ChatResponseDTO`
 - Status codes: 200, 400, 401, 404, 500
-- Error cases: message validation 실패, 인증 실패, 소유 세션 없음, LLM/API/처리 예외
+- Error cases: message validation 실패, 인증 실패, 소유 세션 없음, 120초 초과, LLM/API/처리 예외
 
 ### GET `/api/v1/reminders`
 - 설명: 현재 사용자의 `PENDING` 리마인더 목록을 `remindAt` 오름차순으로 조회한다.

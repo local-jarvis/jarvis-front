@@ -4,13 +4,14 @@
 
 | Method | URL | Auth | 설명 |
 | --- | --- | --- | --- |
-| POST | `http://localhost:8011/api/v1/auth/login` | public | 개인 계정 로그인 및 JWT access token 발급 |
+| POST | `http://localhost:8011/api/v1/auth/login` | public | 개인 계정 로그인 및 JWT access/refresh token 발급 |
+| POST | `http://localhost:8011/api/v1/auth/refresh` | public | refresh token 검증 및 새 JWT access/refresh token 발급 |
 | GET | `http://localhost:8011/api/v1/auth/me` | authenticated | 현재 token 사용자 조회 |
 | GET | `http://localhost:8011/api/v1/chat-sessions` | authenticated | active 채팅 세션 목록 조회 |
 | POST | `http://localhost:8011/api/v1/chat-sessions` | authenticated | 새 채팅 세션 생성 |
 | GET | `http://localhost:8011/api/v1/chat-sessions/{id}` | authenticated | 채팅 세션 상세 조회 |
 | PATCH | `http://localhost:8011/api/v1/chat-sessions/{id}` | authenticated | 채팅 세션 제목 또는 archived 상태 수정 |
-| DELETE | `http://localhost:8011/api/v1/chat-sessions/{id}` | authenticated | 채팅 세션 보관 처리 |
+| DELETE | `http://localhost:8011/api/v1/chat-sessions/{id}` | authenticated | 채팅 세션과 내부 메시지 삭제 |
 | GET | `http://localhost:8011/api/v1/chat-sessions/{id}/messages` | authenticated | 채팅 세션 메시지 목록 조회 |
 | POST | `http://localhost:8011/api/v1/chat` | authenticated | 사용자 메시지 전송 및 작업 실행 결과 수신 |
 | GET | `http://localhost:8011/api/v1/reminders` | authenticated | 대기 중인 리마인더 목록 조회 |

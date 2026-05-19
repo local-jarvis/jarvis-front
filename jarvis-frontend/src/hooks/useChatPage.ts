@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  archiveChatSession,
   cancelReminder,
   createChatSession,
   createMemory,
   createReminder,
   createSchedule,
+  deleteChatSession,
   deleteMemory,
   deleteSchedule,
   fetchActivityEvents,
@@ -22,6 +22,8 @@ import {
   logout,
   saveWebPushSubscription,
   sendChatMessage,
+  startAuthSessionRefreshLoop,
+  stopAuthSessionRefreshLoop,
   updateChatSession,
   updateMemory,
   updateSchedule,
@@ -104,7 +106,7 @@ interface UseChatPageResult extends JarvisWorkspaceViewModel {
   handleSubmitMessage: () => Promise<void>
   handleSessionSelect: (sessionId: string) => Promise<void>
   handleCreateSession: () => Promise<void>
-  handleArchiveSession: (sessionId: string) => Promise<void>
+  handleDeleteSession: (sessionId: string) => Promise<void>
   handleSessionTitleDraftChange: (value: string) => void
   handleSaveSessionTitle: () => Promise<void>
   handleReminderFormChange: (field: keyof ReminderFormViewModel, value: string) => void
@@ -160,6 +162,8 @@ export function useChatPage(): UseChatPageResult {
         return
       }
 
+      startAuthSessionRefreshLoop()
+
       try {
         const currentUser = await fetchCurrentUser()
         const snapshot = await loadWorkspaceSnapshot('', createEmptyScheduleFilters())
@@ -199,6 +203,7 @@ export function useChatPage(): UseChatPageResult {
 
     return () => {
       isMounted = false
+      stopAuthSessionRefreshLoop()
     }
   }, [])
 
@@ -372,12 +377,12 @@ export function useChatPage(): UseChatPageResult {
     }
   }, [markFailureStatus, reloadWorkspace])
 
-  const handleArchiveSession = useCallback(
+  const handleDeleteSession = useCallback(
     async (sessionId: string) => {
       setIsResourceSubmitting(true)
 
       try {
-        await archiveChatSession(Number(sessionId))
+        await deleteChatSession(Number(sessionId))
         await reloadWorkspace(
           workspace.activeSessionId === sessionId ? '' : workspace.activeSessionId,
         )
@@ -836,7 +841,7 @@ export function useChatPage(): UseChatPageResult {
     handleSubmitMessage,
     handleSessionSelect,
     handleCreateSession,
-    handleArchiveSession,
+    handleDeleteSession,
     handleSessionTitleDraftChange,
     handleSaveSessionTitle,
     handleReminderFormChange,

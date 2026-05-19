@@ -51,6 +51,10 @@ export interface AuthLoginRequestDto {
   password: string
 }
 
+export interface AuthRefreshRequestDto {
+  refreshToken: string
+}
+
 export interface AuthUserResponseDto {
   id: number
   email: string
@@ -62,6 +66,8 @@ export interface AuthLoginResponseDto {
   accessToken: string
   tokenType: 'Bearer'
   expiresIn: number
+  refreshToken: string
+  refreshExpiresIn: number
   user: {
     id: number
     email: string

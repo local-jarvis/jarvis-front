@@ -20,19 +20,27 @@
 
 ## 인증 흐름
 - 로그인 화면은 `useChatPage`의 controlled form state를 표시한다.
-- `jarvisApiService.login`은 `POST /api/v1/auth/login`을 호출하고 access token을 `localStorage`에 저장한다.
+- `jarvisApiService.login`은 `POST /api/v1/auth/login`을 호출하고 access token, refresh token, 각 만료 시각을 `localStorage`에 저장한다.
 - 보호 API 호출은 service의 `fetchWithAuth` 경계에서 `Authorization: Bearer {accessToken}` header를 붙인다.
+- token 저장 후 service는 access token 만료 60초 전 실행되는 refresh timer를 예약한다.
+- 인증 워크스페이스 bootstrap 시 hook은 `startAuthSessionRefreshLoop`를 호출하고 unmount 시 `stopAuthSessionRefreshLoop`로 예약된 timer를 정리한다.
+- 보호 API 호출 전에 access token 만료 시각이 60초 이내이면 service가 `POST /api/v1/auth/refresh`로 token을 갱신한다.
+- 보호 API가 401을 반환하고 refresh token이 있으면 service가 refresh를 1회 수행한 뒤 원 요청을 재시도한다.
+- refresh 요청이 일시 실패하고 인증 실패로 판정되지 않으면 service가 30초 뒤 background refresh를 다시 예약한다.
+- 앱이 열린 동안 service의 refresh timer가 access token 만료 60초 전에 인증 세션을 자동 갱신한다.
 - 앱 bootstrap 시 저장된 token이 있으면 `GET /api/v1/auth/me`로 복원한다.
-- 401 응답은 service에서 저장 token을 제거하고 hook이 로그인 상태로 돌아갈 수 있게 실패 상태를 만든다.
+- refresh 실패, refresh token 만료, 또는 재시도 후 401 응답은 service에서 저장 token 전체를 제거하고 hook이 로그인 상태로 돌아갈 수 있게 실패 상태를 만든다.
 
 ## API 흐름
 - JSON API는 `fetchJson`으로 호출하고, 204 응답은 `void`로 처리한다.
 - 채팅 전송은 `POST /api/v1/chat` JSON 응답만 사용한다.
+- LLM 응답을 기다리는 채팅 전송 요청은 프론트 service 경계에서 120초 timeout을 적용한다.
 - Web Push subscription 저장은 service가 수행하지만, `PushManager.subscribe`와 service worker 등록은 browser API라 hook에서 처리한다.
 - Web Push public key는 backend public-key API를 우선 사용하고, 응답이 비활성/누락/실패이면 프론트 내장 fallback key를 사용한다.
 
 ## 저장 흐름
-- 프론트엔드 persistent storage는 access token 저장용 `localStorage`만 사용한다.
+- 프론트엔드 persistent storage는 인증 token 저장용 `localStorage`만 사용한다.
+- `localStorage`에는 access token, refresh token, access token 만료 시각, refresh token 만료 시각을 저장한다.
 - 채팅 세션, 메시지, 리마인더, 일정, 메모리, activity는 모두 backend가 source of truth다.
 - UI form state와 optimistic chat message만 React state에 임시 보관한다.
 

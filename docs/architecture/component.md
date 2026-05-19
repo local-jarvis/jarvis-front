@@ -13,7 +13,7 @@
 - Props 또는 입력 모델 규칙: 컴포넌트 props는 `src/types/chat.ts`의 ViewModel을 사용한다.
 - 출력/result 모델 규칙: service는 backend DTO를 반환하고 hook이 ViewModel로 변환한다.
 - 재사용 기준: 특정 JARVIS 도메인 문구와 상태를 직접 포함한 컴포넌트는 기능 전용으로 취급한다.
-- 소유 경계: backend API 호출과 token 저장은 service가 소유한다.
+- 소유 경계: backend API 호출과 access/refresh token 저장, 예약 갱신, 실패 처리는 service가 소유한다.
 - 소유 경계: form validation, optimistic message, active view 전환, browser Web Push orchestration은 hook이 소유한다.
 - 소유 경계: 화면 표시, disabled 상태, form event 전달은 component가 소유한다.
 
@@ -21,7 +21,7 @@
 | Component | Responsibility | Forbidden |
 | --- | --- | --- |
 | `LoginView` | 로그인 form 표시와 submit intent 전달 | token 저장, API 호출 |
-| `Sidebar` | navigation, 세션 목록, 로그아웃 intent 표시 | 세션 조회/삭제 직접 호출 |
+| `Sidebar` | navigation, 세션 목록, 세션 삭제, 로그아웃 intent 표시 | 세션 조회/삭제 직접 호출 |
 | `ChatHeader` | active session title과 rename form 표시 | 세션 PATCH 직접 호출 |
 | `ChatComposer` | 메시지 입력, quick prompt, Enter 전송과 Shift+Enter 줄바꿈 표시 | chat endpoint 직접 호출 |
 | `ReminderReviewView` | 리마인더 생성 form과 취소 버튼 표시 | reminder API 직접 호출 |

@@ -6,9 +6,16 @@
 - 이 서비스는 개인용 백엔드다. 공개 회원가입 API는 의도적으로 제공하지 않는다.
 - 계정 생성과 비밀번호 변경은 `APP_BOOTSTRAP_USER_EMAIL`, `APP_BOOTSTRAP_USER_PASSWORD`, `APP_BOOTSTRAP_USER_DISPLAY_NAME` 환경변수 수정 후 서버 재시작으로 수행한다.
 - 서버 시작 시 email/password가 모두 있으면 해당 email 계정을 생성하거나 기존 계정의 `password_hash`만 갱신한다.
-- `POST /api/v1/auth/login`으로 JWT access token을 발급받고, 보호 API에는 `Authorization: Bearer {accessToken}` header를 보낸다.
+- `POST /api/v1/auth/login`으로 JWT access token과 refresh token을 발급받고, 보호 API에는 `Authorization: Bearer {accessToken}` header를 보낸다.
+- `POST /api/v1/auth/refresh`는 refresh token을 request body로 받아 새 access token과 refresh token을 발급한다.
+- access token과 refresh token은 같은 secret으로 서명하지만 `tokenUse` claim이 각각 `access`, `refresh`로 다르다.
+- 보호 API는 `tokenUse=access`인 token만 허용한다. refresh token은 `Authorization` header의 Bearer token으로 사용할 수 없다.
+- refresh token은 현재 stateless JWT이며 DB에 저장하지 않는다. 서버는 서명, 만료 시각, token use, 사용자 존재 여부를 검증한다.
 - 인증되지 않은 보호 API 요청은 HTTP 401과 `ChatResponseDTO(status=FAILED)` 형식의 실패 응답을 반환한다.
 - 현재 role/admin 권한 모델은 없다. 인증된 개인 사용자 단위 소유권만 검사한다.
+- JWT 설정:
+  - `APP_JWT_EXPIRATION_SECONDS`: access token 만료 초. 기본 3600.
+  - `APP_JWT_REFRESH_EXPIRATION_SECONDS`: refresh token 만료 초. 기본 604800.
 
 ## 공통 Enum
 
@@ -21,6 +28,8 @@
 | `MEMORY` | 사용자가 명시적으로 기억하라고 한 개인 기억 저장 요청 |
 
 분류 결과가 명확하지 않거나 LLM 분류 호출이 실패하면 `CHAT`으로 처리한다.
+LLM classifier 요청에는 현재 세션의 최근 completed `USER -> ASSISTANT` turn을 포함한다.
+LLM classifier 결과는 서버의 rule-based guard가 최종 보정한다. 명시적 `MEMORY`, `REMINDER`, `SCHEDULE` command는 LLM 결과보다 우선하고, 기억 조회 질문과 맥락성 진술은 저장/일정 생성 task로 처리하지 않는다. 대화 history가 있는 경우 `그거 등록해줘` 같은 지시어 기반 일정 요청은 제한적으로 허용하고, `리마인드는 필요없어` 같은 거절 문구는 새 reminder task로 처리하지 않는다.
 
 ### `ChatStatus`
 | Value | Meaning |
@@ -76,7 +85,7 @@
 ## 엔드포인트
 
 ### POST `/api/v1/auth/login`
-- 설명: 환경변수로 부트스트랩된 개인 계정으로 로그인하고 JWT access token을 발급한다.
+- 설명: 환경변수로 부트스트랩된 개인 계정으로 로그인하고 JWT access token과 refresh token을 발급한다.
 - 인증: public.
 - Request body: `AuthLoginRequestDTO`
 
@@ -91,7 +100,9 @@
 | --- | --- | --- | --- | --- |
 | `accessToken` | string | yes | no | Bearer token 값 |
 | `tokenType` | string | yes | no | 항상 `Bearer` |
-| `expiresIn` | number | yes | no | token 만료까지 초 단위. 기본 3600 |
+| `expiresIn` | number | yes | no | access token 만료까지 초 단위. 기본 3600 |
+| `refreshToken` | string | yes | no | access token 갱신에 사용하는 refresh token 값 |
+| `refreshExpiresIn` | number | yes | no | refresh token 만료까지 초 단위. 기본 604800 |
 | `user.id` | number | yes | no | 사용자 식별자 |
 | `user.email` | string | yes | no | 사용자 email |
 
@@ -102,6 +113,36 @@
 | 200 | 로그인 성공 | `AuthLoginResponseDTO` |
 | 400 | request validation 실패 | `ChatResponseDTO(status=FAILED)` |
 | 401 | email 없음 또는 비밀번호 불일치 | `ChatResponseDTO(status=FAILED)` |
+
+### POST `/api/v1/auth/refresh`
+- 설명: refresh token을 검증하고 새 JWT access token과 refresh token을 발급한다.
+- 인증: public. 만료된 access token이 있어도 호출할 수 있도록 `Authorization` header는 필요하지 않다.
+- Request body: `AuthRefreshRequestDTO`
+
+| Field | Type | Required | Nullable | Meaning | Validation |
+| --- | --- | --- | --- | --- | --- |
+| `refreshToken` | string | yes | no | login 또는 refresh 응답에서 받은 refresh token | `@NotBlank`, `@Size(max = 4096)` |
+
+- Response body: `AuthLoginResponseDTO`
+
+| Field | Type | Required | Nullable | Meaning |
+| --- | --- | --- | --- | --- |
+| `accessToken` | string | yes | no | 새 Bearer access token 값 |
+| `tokenType` | string | yes | no | 항상 `Bearer` |
+| `expiresIn` | number | yes | no | 새 access token 만료까지 초 단위 |
+| `refreshToken` | string | yes | no | 새 refresh token 값 |
+| `refreshExpiresIn` | number | yes | no | 새 refresh token 만료까지 초 단위 |
+| `user.id` | number | yes | no | 사용자 식별자 |
+| `user.email` | string | yes | no | 사용자 email |
+
+- Status codes:
+
+| Status | Condition | Body |
+| --- | --- | --- |
+| 200 | refresh 성공 | `AuthLoginResponseDTO` |
+| 400 | request validation 실패 | `ChatResponseDTO(status=FAILED)` |
+| 401 | refresh token 누락, 만료, 위조, access token 제출 | `ChatResponseDTO(status=FAILED)` |
+| 404 | token의 사용자 id가 DB에 없음 | `ChatResponseDTO(status=FAILED)` |
 
 ### GET `/api/v1/auth/me`
 - 설명: 현재 Bearer token의 사용자 정보를 DB 기준으로 조회한다.
@@ -155,10 +196,15 @@
 - Status codes: 200, 400, 401, 404, 500.
 
 ### DELETE `/api/v1/chat-sessions/{id}`
-- 설명: 현재 사용자가 소유한 채팅 세션을 archived 상태로 전환한다.
+- 설명: 현재 사용자가 소유한 채팅 세션과 세션 내부 메시지를 DB에서 삭제한다.
 - 인증: authenticated.
 - Response body: 없음.
 - Status codes: 204, 401, 404, 500.
+- 동작:
+  - 현재 사용자 소유 세션인지 먼저 확인한다.
+  - 해당 세션의 `chat_messages` row를 먼저 삭제한 뒤 `chat_sessions` row를 삭제한다.
+  - 세션에서 자연어 작업으로 생성된 `user_memories`, `schedules`, `reminders` row는 삭제하지 않는다.
+  - 소유하지 않은 세션은 존재 여부를 노출하지 않기 위해 404로 처리한다.
 
 ### GET `/api/v1/chat-sessions/{id}/messages`
 - 설명: 현재 사용자가 소유한 채팅 세션의 메시지를 createdAt 오름차순으로 조회한다.
@@ -221,11 +267,28 @@
   - `sessionId`가 없으면 현재 사용자에게 귀속되는 새 `ChatSession`을 생성하고 첫 user message 기반 title을 설정한다.
   - `sessionId`가 있으면 현재 사용자 소유 세션인지 확인한다. 소유하지 않은 세션은 404로 처리한다.
   - USER message와 ASSISTANT response는 `chat_messages`에 저장하고 세션의 `lastMessageAt`을 갱신한다.
-  - `CHAT`: 같은 세션의 최근 completed user/assistant message와 현재 사용자의 active memory를 LLM prompt에 포함한다.
-  - `REMINDER`: 현재 사용자에게 귀속되는 reminder를 저장한다.
-  - `SCHEDULE`: 현재 사용자에게 귀속되는 schedule을 저장하고, 사용자별 pending confirmation에 리마인더 생성 여부를 보관한다.
-  - `MEMORY`: 사용자가 명시적으로 기억하라고 한 내용을 현재 사용자 memory로 저장한다.
+  - LLM classifier 요청에는 현재 USER message 이전의 완성된 `USER -> ASSISTANT` turn을 포함하고, 결과는 rule-based guard로 보정한다.
+  - `CHAT`: 같은 세션의 최근 completed user/assistant message 중 완성된 `USER -> ASSISTANT` turn과 현재 사용자의 active memory를 LLM prompt에 포함한다. assistant 응답이 없는 과거 user message는 제외하고 현재 요청 user message만 마지막에 유지한다.
+  - `REMINDER`: `알려줘`, `알림`, `리마인드`, `리마인더`, `깨워줘`, `remind` 같은 명시적 알림 요청이면 현재 사용자에게 귀속되는 reminder를 저장한다.
+  - `SCHEDULE`: `일정 추가`, `일정 등록`, `일정 만들어`, `캘린더`, `회의 잡아줘` 같은 명시적 일정 생성 요청이면 현재 사용자에게 귀속되는 schedule을 저장하고, 사용자별 pending confirmation에 리마인더 생성 여부를 보관한다.
+  - `MEMORY`: `기억해줘`, `기억해둬`, `저장해줘`, `메모해줘`, `잊지마`, `기억 삭제` 같은 명시적 저장/수정/삭제 요청이면 현재 사용자 memory로 저장한다.
+  - 기억 조회 질문(`내 전공이 뭐였지?`, `내가 어느 학교 학생이라고 했어?`, `기억나?`)과 맥락성 진술(`다음 주엔 네트워크 리포트 제출도 있어`, `내일 회의 있어`)은 `CHAT`으로 처리한다.
+  - 일정 리마인더 pending confirmation은 명확한 확인/거절 표현일 때만 소비한다. 새 task command는 pending을 소비하지 않고 일반 task flow로 처리한다.
 - Status codes: 200, 400, 401, 404, 500.
+
+### Task classification guard 정책
+- `MEMORY` 저장 조건: 사용자가 장기 기억의 저장, 수정, 삭제를 명시적으로 요청해야 한다.
+- `MEMORY` 금지 조건: 기억 조회 질문, 회상 질문, 단순 자기소개/맥락 진술은 저장하지 않는다.
+- `SCHEDULE` 생성 조건: 일정/스케줄/캘린더/회의/약속 생성 의도가 명시되어야 한다.
+- `SCHEDULE` 금지 조건: `내일 회의 있어`, `시험이 있어`, `과제 해야 해` 같은 단순 진술은 일정으로 저장하지 않는다.
+- `REMINDER` 생성 조건: 알림, 리마인드, 깨워줘처럼 알림 생성 의도가 명시되어야 한다.
+- `REMINDER` 금지 조건: `리마인드는 필요없어`, `알림은 괜찮아`처럼 직전 확인 질문에 대한 거절 표현은 reminder 생성 요청이 아니다.
+- 다중 의도 제한: 현재 공개 API는 단일 `TaskType`만 반환한다. 일정과 알림을 한 문장에 함께 요청하는 경우 현재 정책은 `SCHEDULE`을 우선하고 일정 생성 후 리마인더 확인 흐름을 사용한다.
+
+### Pending confirmation 정책
+- 일정 생성 후 리마인더 확인 pending은 userId별 서버 메모리에 저장된다.
+- `응`, `ㅇㅇ`, `좋아`, `해줘`, `추가해줘`, `알림도 해줘`, `아니`, `ㄴㄴ`, `필요없어`, `리마인드는 필요없어`, `괜찮아`, `취소` 같은 명확한 답변만 pending을 소비한다.
+- `안녕` 같은 일반 대화와 `1분 뒤에 테스트 알림 보내줘` 같은 새 task command는 pending을 소비하지 않는다. 이 경우 기존 pending은 유지되고 입력은 일반 task flow로 처리된다.
 
 ### POST `/api/v1/chat/stream`
 - 설명: `POST /api/v1/chat`과 같은 세션 기반 task flow를 실행하되 assistant 응답을 Server-Sent Events로 전송한다.
@@ -444,11 +507,17 @@ data: {"sessionId":1,"messageId":10,"message":"응답 스트리밍 중 문제가
 
 ## 외부 API 및 설정
 - LLM 호출은 `LLMClient`가 `POST {llm.base-url}/v1/chat/completions`로 수행한다.
+- LLM request body의 `model` field는 목적별 환경변수로 지정한다.
+  - `LLM_TASK_MODEL`: 작업 분류 요청에 사용하는 모델 id. 기본값은 `gemma-3-1b-it-gguf`.
+  - `LLM_RESPONSE_MODEL`: 일반 응답과 리마인더/일정 JSON 추출 요청에 사용하는 모델 id. 기본값은 `gemma-3-4b-it-gguf`.
+- 두 모델 id는 LLM 서버의 `GET /v1/models` 응답에 포함된 값이어야 한다.
+- 작업 분류 요청도 일반 chat completions 형식을 사용하며, system prompt 뒤에 현재 세션의 최근 completed `USER -> ASSISTANT` turn과 현재 user message를 순서대로 넣는다.
 - 현재 native streaming provider 계약은 아직 연결하지 않았다. `LLMClient.streamGeneralChat`은 non-stream 응답을 chunk callback으로 흘릴 수 있는 future-ready 구조를 제공한다.
 - `LLM_CONNECT_TIMEOUT_MILLIS`, `LLM_READ_TIMEOUT_MILLIS`로 연결/응답 제한 시간을 설정한다.
 - retry는 의도적으로 구현하지 않는다. 개인용 UX에서 느린 재시도보다 빠른 fallback과 확인 요청이 낫기 때문이다.
 - classifier 실패는 `CHAT` fallback으로 처리한다.
 - reminder/schedule extractor 실패는 DB 저장 없이 `NEED_CONFIRMATION` 응답으로 처리한다.
+- reminder/schedule extractor는 순수 JSON, ```json code fence, 일반 code fence, 앞뒤 설명이 붙은 JSON object를 지원한다. 파싱 실패 시 raw response와 parse exception message를 서버 로그에 남긴다.
 - 일반 chat 실패는 fallback 메시지를 반환한다.
 - Web Push 발송은 `core.WebPushClient` adapter에서 SDK `sendAsync` future 제한 시간으로 관리한다.
 - Web Push 설정:
