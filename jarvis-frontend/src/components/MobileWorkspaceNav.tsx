@@ -1,0 +1,113 @@
+import type {
+  AuthUserViewModel,
+  ChatSessionViewModel,
+  ChatWorkspaceView,
+  SystemStatusViewModel,
+} from '../types/chat'
+import { workspaceNavItems } from './workspaceNavigation'
+
+interface MobileWorkspaceNavProps {
+  activeSessionId: string
+  activeView: ChatWorkspaceView
+  isBusy: boolean
+  sessions: ChatSessionViewModel[]
+  systemStatus: SystemStatusViewModel
+  user: AuthUserViewModel
+  onDeleteSession: (sessionId: string) => Promise<void>
+  onCreateSession: () => Promise<void>
+  onLogout: () => void
+  onSessionSelect: (sessionId: string) => Promise<void>
+  onViewSelect: (view: ChatWorkspaceView) => void
+}
+
+export function MobileWorkspaceNav({
+  activeSessionId,
+  activeView,
+  isBusy,
+  sessions,
+  systemStatus,
+  user,
+  onDeleteSession,
+  onCreateSession,
+  onLogout,
+  onSessionSelect,
+  onViewSelect,
+}: MobileWorkspaceNavProps) {
+  const hasActiveSession = activeSessionId.length > 0
+
+  return (
+    <section className="mobile-workspace-nav" aria-label="모바일 작업공간">
+      <div className="mobile-brand-row">
+        <div className="brand-mark">J</div>
+        <div className="mobile-brand-copy">
+          <strong>JARVIS</strong>
+          <span>{user.email}</span>
+        </div>
+        <button className="mobile-logout-button" onClick={onLogout} type="button">
+          로그아웃
+        </button>
+      </div>
+
+      <nav className="mobile-view-tabs" aria-label="주요 기능">
+        {workspaceNavItems.map((item) => (
+          <button
+            aria-current={activeView === item.view ? 'page' : undefined}
+            className={activeView === item.view ? 'active' : ''}
+            key={item.view}
+            onClick={() => onViewSelect(item.view)}
+            type="button"
+          >
+            <span aria-hidden="true">{item.icon}</span>
+            <strong>{item.shortLabel}</strong>
+          </button>
+        ))}
+      </nav>
+
+      <div className="mobile-session-row">
+        <label className="mobile-session-select">
+          <span>세션</span>
+          <select
+            aria-label="채팅 세션 선택"
+            disabled={sessions.length === 0}
+            onChange={(event) => {
+              if (event.target.value) {
+                void onSessionSelect(event.target.value)
+              }
+            }}
+            value={activeSessionId}
+          >
+            <option value="">
+              {sessions.length === 0 ? '세션 없음' : '세션 선택'}
+            </option>
+            {sessions.map((session) => (
+              <option key={session.id} value={session.id}>
+                {session.title}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          className="mobile-session-action"
+          disabled={isBusy}
+          onClick={() => void onCreateSession()}
+          type="button"
+        >
+          새 대화
+        </button>
+        <button
+          className="mobile-session-action"
+          disabled={isBusy || !hasActiveSession}
+          onClick={() => void onDeleteSession(activeSessionId)}
+          type="button"
+        >
+          삭제
+        </button>
+      </div>
+
+      <div className="mobile-status-row">
+        <span>{systemStatus.healthLabel}</span>
+        <strong>{systemStatus.modelName}</strong>
+      </div>
+    </section>
+  )
+}

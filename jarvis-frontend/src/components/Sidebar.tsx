@@ -4,6 +4,7 @@ import type {
   ChatWorkspaceView,
   SystemStatusViewModel,
 } from '../types/chat'
+import { workspaceNavItems } from './workspaceNavigation'
 
 interface SidebarProps {
   activeSessionId: string
@@ -18,15 +19,6 @@ interface SidebarProps {
   onSessionSelect: (sessionId: string) => Promise<void>
   onViewSelect: (view: ChatWorkspaceView) => void
 }
-
-const navItems: Array<{ view: ChatWorkspaceView; label: string; helper: string }> = [
-  { view: 'chat', label: 'Command Chat', helper: 'LIVE' },
-  { view: 'reminders', label: 'Reminders', helper: 'DB' },
-  { view: 'schedules', label: 'Schedule', helper: 'DB' },
-  { view: 'memories', label: 'Memory', helper: 'DB' },
-  { view: 'activity', label: 'Activity', helper: 'LOG' },
-  { view: 'settings', label: 'Server', helper: 'OK' },
-]
 
 /**
  * 인증된 워크스페이스의 좌측 navigation과 세션 목록을 표시한다.
@@ -57,7 +49,7 @@ export function Sidebar({
       <section className="sidebar-section">
         <p className="panel-eyebrow">Mode</p>
         <nav className="toolbar-nav" aria-label="주요 기능">
-          {navItems.map((item) => (
+          {workspaceNavItems.map((item) => (
             <button
               className={
                 activeView === item.view ? 'toolbar-button active' : 'toolbar-button'

@@ -5,6 +5,7 @@ import { ChatMessageList } from '../components/ChatMessageList'
 import { InsightPanel } from '../components/InsightPanel'
 import { LoginView } from '../components/LoginView'
 import { MemoryReviewView } from '../components/MemoryReviewView'
+import { MobileWorkspaceNav } from '../components/MobileWorkspaceNav'
 import { ReminderReviewView } from '../components/ReminderReviewView'
 import { ScheduleReviewView } from '../components/ScheduleReviewView'
 import { SettingsView } from '../components/SettingsView'
@@ -36,6 +37,19 @@ export function ChatPage() {
   return (
     <main className="app-shell">
       <Sidebar
+        activeSessionId={chatPage.activeSessionId}
+        activeView={chatPage.activeView}
+        isBusy={chatPage.isResourceSubmitting}
+        sessions={chatPage.sessions}
+        systemStatus={chatPage.systemStatus}
+        user={chatPage.user}
+        onCreateSession={chatPage.handleCreateSession}
+        onDeleteSession={chatPage.handleDeleteSession}
+        onLogout={chatPage.handleLogout}
+        onSessionSelect={chatPage.handleSessionSelect}
+        onViewSelect={chatPage.handleViewSelect}
+      />
+      <MobileWorkspaceNav
         activeSessionId={chatPage.activeSessionId}
         activeView={chatPage.activeView}
         isBusy={chatPage.isResourceSubmitting}

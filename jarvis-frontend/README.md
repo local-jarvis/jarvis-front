@@ -1,5 +1,15 @@
 # React + TypeScript + Vite
 
+## Environment Variables
+
+Backend API host is configured in `.env`.
+
+```env
+VITE_JARVIS_API_BASE_URL=http://localhost:8011
+```
+
+Copy `.env.example` when setting up another environment and change the host value as needed.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

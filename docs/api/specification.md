@@ -1,6 +1,6 @@
 # API 명세 - jarvis-front
 
-이 문서는 프론트엔드가 소비하는 `jarvis-back` API 계약을 기록한다. 기본 backend host는 `http://localhost:8011`이며, `VITE_JARVIS_API_BASE_URL`로 대체할 수 있다. 보호 API에는 `Authorization: Bearer {accessToken}` header를 보낸다.
+이 문서는 프론트엔드가 소비하는 `jarvis-back` API 계약을 기록한다. Backend host는 `jarvis-frontend/.env`의 `VITE_JARVIS_API_BASE_URL`로 관리하며 기본 로컬 값은 `http://localhost:8011`이다. 보호 API에는 `Authorization: Bearer {accessToken}` header를 보낸다.
 
 ## 공통 인증
 - `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`, `GET /api/v1/web-push/public-key`는 public이다.

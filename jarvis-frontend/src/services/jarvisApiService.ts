@@ -27,9 +27,15 @@ import type {
   WebPushSubscriptionResponseDto,
 } from '../types/chat'
 
-const API_BASE_URL = String(
-  import.meta.env.VITE_JARVIS_API_BASE_URL ?? 'http://localhost:8011',
-).replace(/\/$/, '')
+const configuredApiBaseUrl = import.meta.env.VITE_JARVIS_API_BASE_URL
+
+if (!configuredApiBaseUrl) {
+  throw new Error(
+    'VITE_JARVIS_API_BASE_URL must be set in jarvis-frontend/.env.',
+  )
+}
+
+const API_BASE_URL = configuredApiBaseUrl.replace(/\/$/, '')
 
 const FALLBACK_WEB_PUSH_PUBLIC_KEY =
   import.meta.env.VITE_JARVIS_WEB_PUSH_PUBLIC_KEY ??

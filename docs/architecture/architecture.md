@@ -46,6 +46,7 @@
 
 ## 외부 연동 흐름
 - 프론트엔드는 `jarvis-back`만 직접 호출한다.
+- Backend host는 `jarvis-frontend/.env`의 `VITE_JARVIS_API_BASE_URL`에서 읽으며, service 경계에서 trailing slash를 제거해 endpoint path와 결합한다.
 - LLM, DB, Web Push 발송 SDK는 backend 책임이다.
 - 브라우저 Web Push subscription은 `/web-push-sw.js` service worker와 browser Push API를 통해 얻고, backend에 저장한다.
 - 기존 PushSubscription의 application server key가 현재 public key와 다르면 기존 구독을 해제하고 다시 구독한다.
@@ -57,3 +58,4 @@
 | 2026-05-10 | 채팅을 단일 세션으로 제한 | 초기 제품 흐름이 하나의 연속 대화를 전제로 했기 때문 | conversation list, new chat action, active conversation 상태를 제거했음 |
 | 2026-05-11 | backend API를 `localhost:8011`로 연결 | `.codex/ref_docs/specification.md`의 jarvis-back 계약을 사용하기 위해 | mock service 제거, chat/reminder API service 추가 |
 | 2026-05-17 | `.codex/ref_docs/specification.md`의 인증 기반 전체 API 계약을 프론트에 반영 | 로그인부터 리마인더, 일정, 메모리, activity, Web Push까지 사용하기 위해 | `useChatPage`가 인증 워크스페이스 상태를 소유하고 `jarvisApiService`가 모든 endpoint boundary를 담당 |
+| 2026-05-20 | backend host를 `VITE_JARVIS_API_BASE_URL` 환경변수로 관리 | 개발/배포 환경별 backend host 전환을 코드 수정 없이 처리하기 위해 | `jarvis-frontend/.env`와 `.env.example`에 기본 host를 기록하고 service에서 필수 설정으로 검증 |

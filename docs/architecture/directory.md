@@ -23,7 +23,10 @@
 | `jarvis-frontend/src/components/InsightPanel.tsx` | file | 오른쪽 shortcut rail 표시 | Presentation | view 전환 intent만 전달하고 source of truth 보관 금지 |
 | `jarvis-frontend/src/hooks` | directory | 화면 상태와 UI 유스케이스 캡슐화 | UI Application | `useChatPage`가 backend service 호출 및 DTO 변환 담당 |
 | `jarvis-frontend/src/hooks/useChatPage.ts` | file | 인증, active view, 세션, 메시지, 리소스 form, Web Push browser flow 관리 | UI Application | API 호출은 service 함수로만 수행 |
-| `jarvis-frontend/src/services` | directory | backend API boundary | Service | `jarvisApiService`가 `localhost:8011` API 호출 담당 |
+| `jarvis-frontend/.env` | file | Vite runtime 환경변수 | Configuration | `VITE_JARVIS_API_BASE_URL`로 backend host 관리 |
+| `jarvis-frontend/.env.example` | file | 환경변수 예시 | Configuration | 새 환경 구성 시 복사 기준 |
+| `jarvis-frontend/src/vite-env.d.ts` | file | Vite 환경변수 타입 선언 | Contract | `VITE_JARVIS_API_BASE_URL` 타입 제공 |
+| `jarvis-frontend/src/services` | directory | backend API boundary | Service | `jarvisApiService`가 env 기반 backend API 호출 담당 |
 | `jarvis-frontend/src/services/jarvisApiService.ts` | file | JWT access/refresh token 저장/예약 갱신/부착, JSON API 호출, API error 생성 | Service | 컴포넌트에서 직접 호출 금지 |
 | `jarvis-frontend/src/types` | directory | DTO와 ViewModel 타입 정의 | Contract | API DTO와 UI ViewModel 혼용 금지 |
 | `jarvis-frontend/src/types/chat.ts` | file | jarvis-back DTO, enum union, UI ViewModel 정의 | Contract | persistence entity는 정의하지 않음 |
