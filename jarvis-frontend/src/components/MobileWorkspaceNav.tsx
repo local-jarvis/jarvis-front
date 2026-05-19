@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type {
   AuthUserViewModel,
   ChatSessionViewModel,
@@ -34,79 +35,126 @@ export function MobileWorkspaceNav({
   onViewSelect,
 }: MobileWorkspaceNavProps) {
   const hasActiveSession = activeSessionId.length > 0
+  const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const activeItem = workspaceNavItems.find((item) => item.view === activeView)
+
+  const closeMenu = () => setIsMenuOpen(false)
 
   return (
-    <section className="mobile-workspace-nav" aria-label="모바일 작업공간">
+    <section
+      className={isMenuOpen ? 'mobile-workspace-nav open' : 'mobile-workspace-nav'}
+      aria-label="모바일 작업공간"
+    >
       <div className="mobile-brand-row">
+        <button
+          className="mobile-menu-button"
+          aria-controls="mobile-workspace-menu"
+          aria-expanded={isMenuOpen}
+          aria-label={isMenuOpen ? '메뉴 닫기' : '메뉴 열기'}
+          onClick={() => setIsMenuOpen((current) => !current)}
+          type="button"
+        >
+          <span />
+          <span />
+          <span />
+        </button>
         <div className="brand-mark">J</div>
         <div className="mobile-brand-copy">
           <strong>JARVIS</strong>
-          <span>{user.email}</span>
+          <span>{activeItem?.shortLabel ?? '채팅'} · {systemStatus.healthLabel}</span>
         </div>
-        <button className="mobile-logout-button" onClick={onLogout} type="button">
-          로그아웃
-        </button>
+        <strong className="mobile-active-view">{activeItem?.shortLabel ?? '채팅'}</strong>
       </div>
 
-      <nav className="mobile-view-tabs" aria-label="주요 기능">
-        {workspaceNavItems.map((item) => (
+      <div
+        className="mobile-menu-panel"
+        hidden={!isMenuOpen}
+        id="mobile-workspace-menu"
+      >
+        <div className="mobile-account-row">
+          <span>{user.email}</span>
           <button
-            aria-current={activeView === item.view ? 'page' : undefined}
-            className={activeView === item.view ? 'active' : ''}
-            key={item.view}
-            onClick={() => onViewSelect(item.view)}
+            className="mobile-logout-button"
+            onClick={() => {
+              closeMenu()
+              onLogout()
+            }}
             type="button"
           >
-            <span aria-hidden="true">{item.icon}</span>
-            <strong>{item.shortLabel}</strong>
+            로그아웃
           </button>
-        ))}
-      </nav>
+        </div>
 
-      <div className="mobile-session-row">
-        <label className="mobile-session-select">
-          <span>세션</span>
-          <select
-            aria-label="채팅 세션 선택"
-            disabled={sessions.length === 0}
-            onChange={(event) => {
-              if (event.target.value) {
-                void onSessionSelect(event.target.value)
-              }
-            }}
-            value={activeSessionId}
-          >
-            <option value="">
-              {sessions.length === 0 ? '세션 없음' : '세션 선택'}
-            </option>
-            {sessions.map((session) => (
-              <option key={session.id} value={session.id}>
-                {session.title}
+        <nav className="mobile-view-tabs" aria-label="주요 기능">
+          {workspaceNavItems.map((item) => (
+            <button
+              aria-current={activeView === item.view ? 'page' : undefined}
+              className={activeView === item.view ? 'active' : ''}
+              key={item.view}
+              onClick={() => {
+                onViewSelect(item.view)
+                closeMenu()
+              }}
+              type="button"
+            >
+              <span aria-hidden="true">{item.icon}</span>
+              <strong>{item.shortLabel}</strong>
+            </button>
+          ))}
+        </nav>
+
+        <div className="mobile-session-row">
+          <label className="mobile-session-select">
+            <span>세션</span>
+            <select
+              aria-label="채팅 세션 선택"
+              disabled={sessions.length === 0}
+              onChange={(event) => {
+                if (event.target.value) {
+                  void onSessionSelect(event.target.value)
+                  closeMenu()
+                }
+              }}
+              value={activeSessionId}
+            >
+              <option value="">
+                {sessions.length === 0 ? '세션 없음' : '세션 선택'}
               </option>
-            ))}
-          </select>
-        </label>
-        <button
-          className="mobile-session-action"
-          disabled={isBusy}
-          onClick={() => void onCreateSession()}
-          type="button"
-        >
-          새 대화
-        </button>
-        <button
-          className="mobile-session-action"
-          disabled={isBusy || !hasActiveSession}
-          onClick={() => void onDeleteSession(activeSessionId)}
-          type="button"
-        >
-          삭제
-        </button>
-      </div>
+              {sessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {session.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="mobile-session-action"
+            disabled={isBusy}
+            onClick={() => {
+              void onCreateSession()
+              closeMenu()
+            }}
+            type="button"
+          >
+            새 대화
+          </button>
+          <button
+            className="mobile-session-action"
+            disabled={isBusy || !hasActiveSession}
+            onClick={() => {
+              void onDeleteSession(activeSessionId)
+              closeMenu()
+            }}
+            type="button"
+          >
+            삭제
+          </button>
+        </div>
 
-      <div className="mobile-status-row">
-        <span>{systemStatus.healthLabel}</span>
-        <strong>{systemStatus.modelName}</strong>
+        <div className="mobile-status-row">
+          <span>{systemStatus.healthLabel}</span>
+          <strong>{systemStatus.modelName}</strong>
+        </div>
       </div>
     </section>
   )
