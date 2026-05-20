@@ -53,6 +53,7 @@ export function ChatPage() {
         activeSessionId={chatPage.activeSessionId}
         activeView={chatPage.activeView}
         isBusy={chatPage.isResourceSubmitting}
+        sessionTitleDraft={chatPage.sessionTitleDraft}
         sessions={chatPage.sessions}
         systemStatus={chatPage.systemStatus}
         user={chatPage.user}
@@ -60,6 +61,8 @@ export function ChatPage() {
         onDeleteSession={chatPage.handleDeleteSession}
         onLogout={chatPage.handleLogout}
         onSessionSelect={chatPage.handleSessionSelect}
+        onSessionTitleDraftChange={chatPage.handleSessionTitleDraftChange}
+        onSessionTitleSave={chatPage.handleSaveSessionTitle}
         onViewSelect={chatPage.handleViewSelect}
       />
 

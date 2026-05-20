@@ -990,6 +990,53 @@ textarea:disabled {
     font-size: 12px;
   }
 
+  .mobile-title-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 8px;
+    border: 1px solid var(--line);
+    border-radius: 13px;
+    padding: 10px;
+    background: rgba(9, 9, 11, 0.3);
+  }
+
+  .mobile-title-form label {
+    display: grid;
+    min-width: 0;
+    gap: 6px;
+  }
+
+  .mobile-title-form span {
+    color: var(--muted-subtle);
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .mobile-title-form input {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    padding: 9px 10px;
+    color: var(--text);
+    outline: 0;
+    background: rgba(16, 18, 22, 0.82);
+  }
+
+  .mobile-title-form button {
+    min-height: 40px;
+    border: 0;
+    border-radius: 11px;
+    padding: 9px 13px;
+    color: #052e1a;
+    background: var(--green);
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
   .mobile-logout-button,
   .mobile-session-action,
   .mobile-view-tabs button {
@@ -1115,9 +1162,9 @@ textarea:disabled {
   .resource-header {
     align-items: stretch;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
     min-height: 0;
-    padding: 14px 14px 12px;
+    padding: 10px 14px;
   }
 
   .chat-header h2,
@@ -1136,9 +1183,11 @@ textarea:disabled {
     padding: 6px 9px;
   }
 
+  .chat-header .session-title-form {
+    display: none;
+  }
+
   .session-title-form,
-  .composer-row,
-  .composer-actions,
   .resource-form.two-column,
   .resource-form.three-column,
   .settings-grid {
@@ -1200,6 +1249,7 @@ textarea:disabled {
     flex-wrap: nowrap;
     overflow-x: auto;
     overscroll-behavior-x: contain;
+    margin-bottom: 6px;
     padding-bottom: 4px;
     scrollbar-width: none;
   }
@@ -1210,27 +1260,36 @@ textarea:disabled {
 
   .quick-prompts button {
     flex: 0 0 auto;
+    padding: 5px 8px;
+    font-size: 11px;
   }
 
   .composer {
-    padding-bottom: calc(14px + env(safe-area-inset-bottom));
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
   }
 
   .composer-row {
-    align-items: stretch;
+    display: flex;
+    align-items: flex-end;
     gap: 8px;
     border-radius: 14px;
-    padding: 10px;
+    padding: 8px 8px 8px 10px;
   }
 
   .composer textarea {
-    min-height: 78px;
-    padding: 2px 0;
+    min-height: 34px;
+    max-height: 76px;
+    padding: 4px 0;
   }
 
-  .composer-actions,
+  .composer-actions {
+    flex: 0 0 auto;
+  }
+
   .composer-actions .send-button {
-    width: 100%;
+    min-height: 38px;
+    padding: 8px 13px;
+    white-space: nowrap;
   }
 
   .resource-form.two-column,

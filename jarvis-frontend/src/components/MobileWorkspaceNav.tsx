@@ -11,6 +11,7 @@ interface MobileWorkspaceNavProps {
   activeSessionId: string
   activeView: ChatWorkspaceView
   isBusy: boolean
+  sessionTitleDraft: string
   sessions: ChatSessionViewModel[]
   systemStatus: SystemStatusViewModel
   user: AuthUserViewModel
@@ -18,6 +19,8 @@ interface MobileWorkspaceNavProps {
   onCreateSession: () => Promise<void>
   onLogout: () => void
   onSessionSelect: (sessionId: string) => Promise<void>
+  onSessionTitleDraftChange: (value: string) => void
+  onSessionTitleSave: () => Promise<void>
   onViewSelect: (view: ChatWorkspaceView) => void
 }
 
@@ -25,6 +28,7 @@ export function MobileWorkspaceNav({
   activeSessionId,
   activeView,
   isBusy,
+  sessionTitleDraft,
   sessions,
   systemStatus,
   user,
@@ -32,6 +36,8 @@ export function MobileWorkspaceNav({
   onCreateSession,
   onLogout,
   onSessionSelect,
+  onSessionTitleDraftChange,
+  onSessionTitleSave,
   onViewSelect,
 }: MobileWorkspaceNavProps) {
   const hasActiveSession = activeSessionId.length > 0
@@ -84,6 +90,32 @@ export function MobileWorkspaceNav({
             로그아웃
           </button>
         </div>
+
+        {activeView === 'chat' && (
+          <form
+            className="mobile-title-form"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void onSessionTitleSave().then(closeMenu)
+            }}
+          >
+            <label>
+              <span>세션 제목</span>
+              <input
+                aria-label="세션 제목"
+                disabled={!activeSessionId || isBusy}
+                onChange={(event) =>
+                  onSessionTitleDraftChange(event.target.value)
+                }
+                placeholder="세션 제목"
+                value={sessionTitleDraft}
+              />
+            </label>
+            <button disabled={!activeSessionId || isBusy} type="submit">
+              저장
+            </button>
+          </form>
+        )}
 
         <nav className="mobile-view-tabs" aria-label="주요 기능">
           {workspaceNavItems.map((item) => (
