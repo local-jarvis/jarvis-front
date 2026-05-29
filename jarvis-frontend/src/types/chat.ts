@@ -1,5 +1,11 @@
 export type ChatTaskType =
   | 'CHAT'
+  | 'REMINDER_CREATE'
+  | 'SCHEDULE_CREATE'
+  | 'SCHEDULE_QUERY'
+  | 'MEMORY_WRITE'
+  | 'MEMORY_QUERY'
+  | 'NEWS_SUMMARY'
   | 'REMINDER'
   | 'SCHEDULE'
   | 'MEMORY'
@@ -34,6 +40,25 @@ export type ChatWorkspaceView =
   | 'settings'
 
 export type SystemHealthLabel = 'OFFLINE' | 'ONLINE' | 'FAILED'
+
+export type ResourceViewMode = 'list' | 'calendar'
+
+export type ResourceEditorMode = 'closed' | 'create' | 'edit'
+
+export type CalendarMonthDirection = 'previous' | 'next' | 'today'
+
+export type CalendarEventKind = 'reminder' | 'schedule'
+
+export type DirectTaskExecutionMode =
+  | 'chat'
+  | 'reminder-create'
+  | 'schedule-create'
+  | 'schedule-query'
+  | 'memory-write'
+  | 'memory-query'
+  | 'news-summary'
+
+export type ChatExecutionMode = 'auto' | 'stream' | DirectTaskExecutionMode
 
 export interface ChatResponseErrorDto {
   message: string
@@ -113,13 +138,82 @@ export interface ChatRequestDto {
   message: string
 }
 
+export interface TaskExecutionRequestDto {
+  message: string
+}
+
+export interface ChatStreamHeartbeatEventDto {
+  event: 'heartbeat'
+  sessionId?: number | null
+}
+
+export interface ChatStreamMessageEventDto {
+  event: 'message'
+  sessionId?: number | null
+  messageId?: number | null
+  chunk: string
+}
+
+export interface ChatStreamCompleteEventDto {
+  event: 'complete'
+  sessionId?: number | null
+  messageId?: number | null
+  message: string
+}
+
+export interface ChatStreamErrorEventDto {
+  event: 'error'
+  sessionId?: number | null
+  messageId?: number | null
+  message: string
+}
+
+export type ChatStreamEventDto =
+  | ChatStreamHeartbeatEventDto
+  | ChatStreamMessageEventDto
+  | ChatStreamCompleteEventDto
+  | ChatStreamErrorEventDto
+
+export interface ChatStreamHandlers {
+  onHeartbeat?: (event: ChatStreamHeartbeatEventDto) => void
+  onMessage?: (event: ChatStreamMessageEventDto) => void
+  onComplete?: (event: ChatStreamCompleteEventDto) => void
+}
+
+export interface NewsArticleDto {
+  title: string
+  url: string
+}
+
+export interface NewsSummaryResultDto {
+  keyword: string
+  requestedCount: number
+  collectedCount: number
+  summary: string
+  articles: NewsArticleDto[]
+}
+
+export interface ScheduleQueryResultDto {
+  from?: string | null
+  to?: string | null
+  schedules?: ScheduleResponseDto[]
+  [key: string]: unknown
+}
+
 export interface ChatResponseDto {
   sessionId?: number | null
   messageId?: number | null
   message: string
   taskType: ChatTaskType
   status: ChatStatus
-  data?: Record<string, unknown> | ReminderResponseDto | ScheduleResponseDto | null
+  data?:
+    | Record<string, unknown>
+    | ReminderResponseDto
+    | ScheduleResponseDto
+    | UserMemoryResponseDto
+    | ScheduleQueryResultDto
+    | NewsSummaryResultDto
+    | null
   createdAt: string
 }
 
@@ -268,6 +362,7 @@ export interface ReminderFormViewModel {
 export interface ReminderViewModel {
   id: string
   title: string
+  remindAtValue: string
   remindAtLabel: string
   statusLabel: ReminderStatus
   createdAtLabel: string
@@ -289,9 +384,37 @@ export interface ScheduleFormViewModel {
 export interface ScheduleViewModel {
   id: string
   title: string
+  startAtValue: string
+  endAtValue: string
   startAtLabel: string
   endAtLabel: string
   createdAtLabel: string
+}
+
+export interface CalendarEventViewModel {
+  id: string
+  kind: CalendarEventKind
+  title: string
+  dateKey: string
+  timeLabel: string
+  statusLabel: string
+  sortValue: string
+}
+
+export interface CalendarDayViewModel {
+  dateKey: string
+  dayOfMonthLabel: string
+  isCurrentMonth: boolean
+  isToday: boolean
+  events: CalendarEventViewModel[]
+}
+
+export interface ResourceCalendarViewModel {
+  monthKey: string
+  monthLabel: string
+  weekdayLabels: string[]
+  days: CalendarDayViewModel[]
+  emptyMessage: string
 }
 
 export interface MemoryFormViewModel {
@@ -335,6 +458,12 @@ export interface QuickPromptViewModel {
   id: string
   label: string
   prompt: string
+  executionMode?: ChatExecutionMode
+}
+
+export interface ChatExecutionModeViewModel {
+  id: ChatExecutionMode
+  label: string
 }
 
 export interface JarvisWorkspaceViewModel {
@@ -347,6 +476,13 @@ export interface JarvisWorkspaceViewModel {
   classifications: TaskClassificationViewModel[]
   reminders: ReminderViewModel[]
   schedules: ScheduleViewModel[]
+  reminderViewMode: ResourceViewMode
+  scheduleViewMode: ResourceViewMode
+  reminderEditorMode: ResourceEditorMode
+  scheduleEditorMode: ResourceEditorMode
+  memoryEditorMode: ResourceEditorMode
+  reminderCalendarMonth: string
+  scheduleCalendarMonth: string
   memories: MemoryViewModel[]
   activityEvents: ActivityEventViewModel[]
   reminderForm: ReminderFormViewModel
@@ -356,4 +492,6 @@ export interface JarvisWorkspaceViewModel {
   webPush: WebPushViewModel
   quickPrompts: QuickPromptViewModel[]
   systemStatus: SystemStatusViewModel
+  executionModes: ChatExecutionModeViewModel[]
+  selectedExecutionMode: ChatExecutionMode
 }

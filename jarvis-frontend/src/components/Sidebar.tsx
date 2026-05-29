@@ -6,6 +6,8 @@ import type {
 } from '../types/chat'
 import { workspaceNavItems } from './workspaceNavigation'
 
+const sidebarNavItems = workspaceNavItems.filter((item) => item.view !== 'activity')
+
 interface SidebarProps {
   activeSessionId: string
   activeView: ChatWorkspaceView
@@ -49,7 +51,7 @@ export function Sidebar({
       <section className="sidebar-section">
         <p className="panel-eyebrow">Mode</p>
         <nav className="toolbar-nav" aria-label="주요 기능">
-          {workspaceNavItems.map((item) => (
+          {sidebarNavItems.map((item) => (
             <button
               className={
                 activeView === item.view ? 'toolbar-button active' : 'toolbar-button'
@@ -64,7 +66,7 @@ export function Sidebar({
           ))}
         </nav>
       </section>
-
+      <br/>
       <section className="session-panel" aria-label="채팅 세션">
         <div className="section-title-row">
           <p className="panel-eyebrow">Sessions</p>
@@ -72,6 +74,7 @@ export function Sidebar({
             New
           </button>
         </div>
+        <br></br>
         <div className="session-list">
           {sessions.length === 0 ? (
             <p className="empty-copy">세션 없음</p>

@@ -82,10 +82,13 @@ export function ChatPage() {
             messages={chatPage.messages}
           />
           <ChatComposer
+            executionModes={chatPage.executionModes}
             isSubmitting={chatPage.isSubmitting}
             quickPrompts={chatPage.quickPrompts}
+            selectedExecutionMode={chatPage.selectedExecutionMode}
             value={chatPage.composerText}
             onChange={chatPage.handleComposerTextChange}
+            onExecutionModeChange={chatPage.handleExecutionModeChange}
             onPromptSelect={chatPage.handlePromptSelect}
             onSubmit={chatPage.handleSubmitMessage}
           />
@@ -94,28 +97,42 @@ export function ChatPage() {
 
       {chatPage.activeView === 'reminders' && (
         <ReminderReviewView
+          calendar={chatPage.reminderCalendar}
           form={chatPage.reminderForm}
           isBusy={chatPage.isResourceSubmitting}
           reminders={chatPage.reminders}
+          editorMode={chatPage.reminderEditorMode}
+          viewMode={chatPage.reminderViewMode}
+          onCalendarMonthChange={chatPage.handleReminderCalendarMonthChange}
           onCancelReminder={chatPage.handleCancelReminder}
+          onCloseEditor={chatPage.handleCloseReminderEditor}
           onFormChange={chatPage.handleReminderFormChange}
+          onOpenEditor={chatPage.handleOpenReminderEditor}
           onSubmit={chatPage.handleCreateReminder}
+          onViewModeChange={chatPage.handleReminderViewModeChange}
         />
       )}
 
       {chatPage.activeView === 'schedules' && (
         <ScheduleReviewView
+          calendar={chatPage.scheduleCalendar}
           filters={chatPage.scheduleFilters}
           form={chatPage.scheduleForm}
           isBusy={chatPage.isResourceSubmitting}
           schedules={chatPage.schedules}
+          editorMode={chatPage.scheduleEditorMode}
+          viewMode={chatPage.scheduleViewMode}
+          onCalendarMonthChange={chatPage.handleScheduleCalendarMonthChange}
+          onCloseEditor={chatPage.handleCloseScheduleEditor}
           onClearForm={chatPage.handleClearScheduleForm}
           onDeleteSchedule={chatPage.handleDeleteSchedule}
           onEditSchedule={chatPage.handleEditSchedule}
           onFiltersChange={chatPage.handleScheduleFiltersChange}
+          onOpenEditor={chatPage.handleOpenScheduleEditor}
           onRefresh={chatPage.handleRefreshSchedules}
           onSave={chatPage.handleSaveSchedule}
           onFormChange={chatPage.handleScheduleFormChange}
+          onViewModeChange={chatPage.handleScheduleViewModeChange}
         />
       )}
 
@@ -124,10 +141,13 @@ export function ChatPage() {
           form={chatPage.memoryForm}
           isBusy={chatPage.isResourceSubmitting}
           memories={chatPage.memories}
+          editorMode={chatPage.memoryEditorMode}
           onClearForm={chatPage.handleClearMemoryForm}
+          onCloseEditor={chatPage.handleCloseMemoryEditor}
           onDeleteMemory={chatPage.handleDeleteMemory}
           onEditMemory={chatPage.handleEditMemory}
           onFormChange={chatPage.handleMemoryFormChange}
+          onOpenEditor={chatPage.handleOpenMemoryEditor}
           onSave={chatPage.handleSaveMemory}
         />
       )}

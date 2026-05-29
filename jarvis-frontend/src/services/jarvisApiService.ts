@@ -13,12 +13,19 @@ import type {
   ChatSessionCreateRequestDto,
   ChatSessionResponseDto,
   ChatSessionUpdateRequestDto,
+  ChatStreamCompleteEventDto,
+  ChatStreamEventDto,
+  ChatStreamHandlers,
+  ChatStreamHeartbeatEventDto,
+  ChatStreamMessageEventDto,
+  DirectTaskExecutionMode,
   ReminderCreateRequestDto,
   ReminderResponseDto,
   ScheduleCreateRequestDto,
   ScheduleListQueryDto,
   ScheduleResponseDto,
   ScheduleUpdateRequestDto,
+  TaskExecutionRequestDto,
   UserMemoryCreateRequestDto,
   UserMemoryResponseDto,
   UserMemoryUpdateRequestDto,
@@ -48,6 +55,15 @@ const REFRESH_TOKEN_EXPIRES_AT_STORAGE_KEY = 'jarvis.refreshTokenExpiresAt'
 const CHAT_REQUEST_TIMEOUT_MILLIS = 120_000
 const ACCESS_TOKEN_REFRESH_BUFFER_MILLIS = 60_000
 const FAILED_AUTH_REFRESH_RETRY_DELAY_MILLIS = 30_000
+const TASK_EXECUTION_PATH_BY_MODE: Record<DirectTaskExecutionMode, string> = {
+  chat: '/api/v1/task-executions/chat',
+  'reminder-create': '/api/v1/task-executions/reminder-create',
+  'schedule-create': '/api/v1/task-executions/schedule-create',
+  'schedule-query': '/api/v1/task-executions/schedule-query',
+  'memory-write': '/api/v1/task-executions/memory-write',
+  'memory-query': '/api/v1/task-executions/memory-query',
+  'news-summary': '/api/v1/task-executions/news-summary',
+}
 
 let authRefreshPromise: Promise<AuthLoginResponseDto> | null = null
 let authRefreshTimerId: number | undefined
@@ -192,6 +208,49 @@ export async function sendChatMessage(
   request: ChatRequestDto,
 ): Promise<ChatResponseDto> {
   return fetchJson<ChatResponseDto>('/api/v1/chat', {
+    method: 'POST',
+    body: JSON.stringify(request),
+    timeoutMillis: CHAT_REQUEST_TIMEOUT_MILLIS,
+  })
+}
+
+/**
+ * 사용자 메시지를 SSE chat endpoint로 전송하고 assistant chunk를 순차 처리한다.
+ */
+export async function streamChatMessage(
+  request: ChatRequestDto,
+  handlers: ChatStreamHandlers,
+): Promise<ChatStreamCompleteEventDto> {
+  let response = await fetchWithAuth('/api/v1/chat/stream', {
+    method: 'POST',
+    body: JSON.stringify(request),
+    acceptHeader: 'text/event-stream',
+  })
+
+  if (response.status === 401 && shouldRefreshAuthSession({})) {
+    await refreshStoredAuthSession()
+    response = await fetchWithAuth('/api/v1/chat/stream', {
+      method: 'POST',
+      body: JSON.stringify(request),
+      acceptHeader: 'text/event-stream',
+    })
+  }
+
+  if (!response.ok) {
+    throw await createApiError(response)
+  }
+
+  return readChatStream(response, handlers)
+}
+
+/**
+ * 분류를 생략하고 사용자가 선택한 task endpoint를 직접 실행한다.
+ */
+export async function executeDirectTask(
+  mode: DirectTaskExecutionMode,
+  request: TaskExecutionRequestDto,
+): Promise<ChatResponseDto> {
+  return fetchJson<ChatResponseDto>(TASK_EXECUTION_PATH_BY_MODE[mode], {
     method: 'POST',
     body: JSON.stringify(request),
     timeoutMillis: CHAT_REQUEST_TIMEOUT_MILLIS,
@@ -376,6 +435,7 @@ type FetchJsonInit = RequestInit & {
   skipAuth?: boolean
   skipRefresh?: boolean
   timeoutMillis?: number
+  acceptHeader?: string
 }
 
 async function fetchJson<TResponse>(
@@ -404,10 +464,10 @@ async function fetchWithAuth(
   path: string,
   init: FetchJsonInit = {},
 ): Promise<Response> {
-  const { skipAuth, timeoutMillis, ...requestInit } = init
+  const { acceptHeader, skipAuth, timeoutMillis, ...requestInit } = init
   const headers = new Headers(requestInit.headers)
 
-  headers.set('Accept', 'application/json')
+  headers.set('Accept', acceptHeader ?? 'application/json')
 
   if (requestInit.body) {
     headers.set('Content-Type', 'application/json')
@@ -559,6 +619,155 @@ function isChatResponseError(value: unknown): value is ChatResponseErrorDto {
     'status' in value &&
     value.status === 'FAILED'
   )
+}
+
+async function readChatStream(
+  response: Response,
+  handlers: ChatStreamHandlers,
+): Promise<ChatStreamCompleteEventDto> {
+  if (!response.body) {
+    throw new Error('SSE 응답 본문을 읽을 수 없습니다.')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let completeEvent: ChatStreamCompleteEventDto | null = null
+
+  while (true) {
+    const { done, value } = await reader.read()
+
+    if (done) {
+      break
+    }
+
+    buffer += decoder.decode(value, { stream: true })
+    const parsedEvents = parseCompletedSseEvents(buffer)
+
+    buffer = parsedEvents.remainingBuffer
+
+    parsedEvents.events.forEach((event) => {
+      if (event.event === 'heartbeat') {
+        handlers.onHeartbeat?.(event)
+        return
+      }
+
+      if (event.event === 'message') {
+        handlers.onMessage?.(event)
+        return
+      }
+
+      if (event.event === 'complete') {
+        completeEvent = event
+        handlers.onComplete?.(event)
+        return
+      }
+
+      throw new Error(event.message)
+    })
+  }
+
+  if (buffer.trim().length > 0) {
+    const finalEvent = parseSseEvent(buffer)
+
+    if (finalEvent) {
+      if (finalEvent.event === 'complete') {
+        completeEvent = finalEvent
+        handlers.onComplete?.(finalEvent)
+      } else if (finalEvent.event === 'error') {
+        throw new Error(finalEvent.message)
+      }
+    }
+  }
+
+  if (!completeEvent) {
+    throw new Error('SSE 응답이 complete event 없이 종료되었습니다.')
+  }
+
+  return completeEvent
+}
+
+function parseCompletedSseEvents(buffer: string): {
+  events: ChatStreamEventDto[]
+  remainingBuffer: string
+} {
+  const normalizedBuffer = buffer.replace(/\r\n/g, '\n')
+  const blocks = normalizedBuffer.split('\n\n')
+  const remainingBuffer = blocks.pop() ?? ''
+  const events = blocks
+    .map(parseSseEvent)
+    .filter((event): event is ChatStreamEventDto => event !== null)
+
+  return {
+    events,
+    remainingBuffer,
+  }
+}
+
+function parseSseEvent(block: string): ChatStreamEventDto | null {
+  const lines = block.split('\n')
+  let eventType = 'message'
+  const dataLines: string[] = []
+
+  lines.forEach((line) => {
+    if (line.startsWith('event:')) {
+      eventType = line.slice('event:'.length).trim()
+      return
+    }
+
+    if (line.startsWith('data:')) {
+      dataLines.push(line.slice('data:'.length).trimStart())
+    }
+  })
+
+  if (dataLines.length === 0) {
+    return null
+  }
+
+  const data = JSON.parse(dataLines.join('\n')) as Record<string, unknown>
+
+  if (eventType === 'heartbeat') {
+    return {
+      event: 'heartbeat',
+      sessionId: readOptionalNumber(data.sessionId),
+    } satisfies ChatStreamHeartbeatEventDto
+  }
+
+  if (eventType === 'message') {
+    return {
+      event: 'message',
+      sessionId: readOptionalNumber(data.sessionId),
+      messageId: readOptionalNumber(data.messageId),
+      chunk: typeof data.chunk === 'string' ? data.chunk : '',
+    } satisfies ChatStreamMessageEventDto
+  }
+
+  if (eventType === 'complete') {
+    return {
+      event: 'complete',
+      sessionId: readOptionalNumber(data.sessionId),
+      messageId: readOptionalNumber(data.messageId),
+      message: typeof data.message === 'string' ? data.message : '',
+    }
+  }
+
+  if (eventType === 'error') {
+    return {
+      event: 'error',
+      sessionId: readOptionalNumber(data.sessionId),
+      messageId: readOptionalNumber(data.messageId),
+      message:
+        typeof data.message === 'string'
+          ? data.message
+          : 'SSE 응답 처리 중 오류가 발생했습니다.',
+    }
+  }
+
+  return null
+}
+
+function readOptionalNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 function createSearchParams(

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   cancelReminder,
   createChatSession,
@@ -8,6 +8,7 @@ import {
   deleteChatSession,
   deleteMemory,
   deleteSchedule,
+  executeDirectTask,
   fetchActivityEvents,
   fetchChatSessionMessages,
   fetchChatSessions,
@@ -24,6 +25,7 @@ import {
   sendChatMessage,
   startAuthSessionRefreshLoop,
   stopAuthSessionRefreshLoop,
+  streamChatMessage,
   updateChatSession,
   updateMemory,
   updateSchedule,
@@ -34,13 +36,19 @@ import type {
   ActivityEventViewModel,
   AuthUserResponseDto,
   AuthUserViewModel,
+  CalendarEventViewModel,
+  CalendarMonthDirection,
+  ChatExecutionMode,
+  ChatExecutionModeViewModel,
   ChatMessageResponseDto,
   ChatMessageViewModel,
   ChatResponseDto,
   ChatSessionResponseDto,
   ChatSessionViewModel,
+  ChatStreamCompleteEventDto,
   ChatTaskType,
   ChatWorkspaceView,
+  DirectTaskExecutionMode,
   JarvisWorkspaceViewModel,
   MemoryFormViewModel,
   MemoryViewModel,
@@ -48,6 +56,8 @@ import type {
   ReminderFormViewModel,
   ReminderResponseDto,
   ReminderViewModel,
+  ResourceCalendarViewModel,
+  ResourceViewMode,
   ScheduleFiltersViewModel,
   ScheduleFormViewModel,
   ScheduleResponseDto,
@@ -60,23 +70,54 @@ import type {
 
 const PENDING_ASSISTANT_MESSAGE_CONTENT = 'Jarvis가 생각중입니다.'
 
+const chatExecutionModes: ChatExecutionModeViewModel[] = [
+  { id: 'auto', label: '자동' },
+  { id: 'stream', label: '스트림' },
+  { id: 'chat', label: '채팅' },
+  { id: 'reminder-create', label: '알림 생성' },
+  { id: 'schedule-create', label: '일정 생성' },
+  { id: 'schedule-query', label: '일정 조회' },
+  { id: 'memory-write', label: '기억 저장' },
+  { id: 'memory-query', label: '기억 조회' },
+  { id: 'news-summary', label: '뉴스 요약' },
+]
+
 const quickPrompts: QuickPromptViewModel[] = [
   {
     id: 'prompt-daily-plan',
     label: '오늘 할 일 정리',
     prompt: '오늘 할 일을 우선순위대로 정리해줘',
+    executionMode: 'auto',
   },
   {
     id: 'prompt-reminder',
     label: '내일 9시 알림',
     prompt: '내일 오전 9시에 회의 준비하라고 알려줘',
+    executionMode: 'reminder-create',
   },
   {
     id: 'prompt-memory',
     label: '기억 저장',
     prompt: '내가 커피보다 차를 더 좋아한다고 기억해줘',
+    executionMode: 'memory-write',
+  },
+  {
+    id: 'prompt-schedule-query',
+    label: '다음주 일정',
+    prompt: '내 다음주 스케줄을 알려줘',
+    executionMode: 'schedule-query',
+  },
+  {
+    id: 'prompt-news-summary',
+    label: '뉴스 요약',
+    prompt: '인공지능 최근 이슈를 뉴스 기반으로 요약해줘',
+    executionMode: 'news-summary',
   },
 ]
+
+const calendarWeekdayLabels = ['일', '월', '화', '수', '목', '금', '토']
+
+const calendarDayCount = 42
 
 interface WorkspaceSnapshot {
   sessions: ChatSessionResponseDto[]
@@ -94,6 +135,8 @@ interface UseChatPageResult extends JarvisWorkspaceViewModel {
   isWorkspaceLoading: boolean
   isSubmitting: boolean
   isResourceSubmitting: boolean
+  reminderCalendar: ResourceCalendarViewModel
+  scheduleCalendar: ResourceCalendarViewModel
   composerText: string
   sessionTitleDraft: string
   handleLoginEmailChange: (value: string) => void
@@ -101,6 +144,7 @@ interface UseChatPageResult extends JarvisWorkspaceViewModel {
   handleLoginSubmit: () => Promise<void>
   handleLogout: () => void
   handleViewSelect: (view: ChatWorkspaceView) => void
+  handleExecutionModeChange: (mode: ChatExecutionMode) => void
   handleComposerTextChange: (value: string) => void
   handlePromptSelect: (prompt: QuickPromptViewModel) => void
   handleSubmitMessage: () => Promise<void>
@@ -110,6 +154,10 @@ interface UseChatPageResult extends JarvisWorkspaceViewModel {
   handleSessionTitleDraftChange: (value: string) => void
   handleSaveSessionTitle: () => Promise<void>
   handleReminderFormChange: (field: keyof ReminderFormViewModel, value: string) => void
+  handleOpenReminderEditor: () => void
+  handleCloseReminderEditor: () => void
+  handleReminderViewModeChange: (mode: ResourceViewMode) => void
+  handleReminderCalendarMonthChange: (direction: CalendarMonthDirection) => void
   handleCreateReminder: () => Promise<void>
   handleCancelReminder: (reminderId: string) => Promise<void>
   handleScheduleFiltersChange: (
@@ -117,12 +165,18 @@ interface UseChatPageResult extends JarvisWorkspaceViewModel {
     value: string,
   ) => void
   handleRefreshSchedules: () => Promise<void>
+  handleScheduleViewModeChange: (mode: ResourceViewMode) => void
+  handleScheduleCalendarMonthChange: (direction: CalendarMonthDirection) => void
   handleScheduleFormChange: (field: keyof ScheduleFormViewModel, value: string) => void
+  handleOpenScheduleEditor: () => void
+  handleCloseScheduleEditor: () => void
   handleEditSchedule: (schedule: ScheduleViewModel) => void
   handleClearScheduleForm: () => void
   handleSaveSchedule: () => Promise<void>
   handleDeleteSchedule: (scheduleId: string) => Promise<void>
   handleMemoryFormChange: (field: keyof MemoryFormViewModel, value: string) => void
+  handleOpenMemoryEditor: () => void
+  handleCloseMemoryEditor: () => void
   handleEditMemory: (memory: MemoryViewModel) => void
   handleClearMemoryForm: () => void
   handleSaveMemory: () => Promise<void>
@@ -152,6 +206,26 @@ export function useChatPage(): UseChatPageResult {
       systemStatus: createSystemStatus('FAILED', getErrorMessage(error)),
     }))
   }, [])
+
+  const reminderCalendar = useMemo(
+    () =>
+      createCalendarMonthViewModel(
+        workspace.reminderCalendarMonth,
+        workspace.reminders.map(mapReminderViewModelToCalendarEvent),
+        '이 달에 표시할 리마인더가 없습니다.',
+      ),
+    [workspace.reminderCalendarMonth, workspace.reminders],
+  )
+
+  const scheduleCalendar = useMemo(
+    () =>
+      createCalendarMonthViewModel(
+        workspace.scheduleCalendarMonth,
+        workspace.schedules.map(mapScheduleViewModelToCalendarEvent),
+        '이 달에 표시할 일정이 없습니다.',
+      ),
+    [workspace.scheduleCalendarMonth, workspace.schedules],
+  )
 
   useEffect(() => {
     let isMounted = true
@@ -324,6 +398,13 @@ export function useChatPage(): UseChatPageResult {
     }))
   }, [])
 
+  const handleExecutionModeChange = useCallback((mode: ChatExecutionMode) => {
+    setWorkspace((currentWorkspace) => ({
+      ...currentWorkspace,
+      selectedExecutionMode: mode,
+    }))
+  }, [])
+
   const handleComposerTextChange = useCallback((value: string) => {
     setComposerText(value)
   }, [])
@@ -333,6 +414,8 @@ export function useChatPage(): UseChatPageResult {
     setWorkspace((currentWorkspace) => ({
       ...currentWorkspace,
       activeView: 'chat',
+      selectedExecutionMode:
+        prompt.executionMode ?? currentWorkspace.selectedExecutionMode,
     }))
   }, [])
 
@@ -418,32 +501,83 @@ export function useChatPage(): UseChatPageResult {
     }
   }, [markFailureStatus, reloadWorkspace, sessionTitleDraft, workspace.activeSessionId])
 
-  const submitJsonMessage = useCallback(
+  const refreshDirectTaskResources = useCallback(async () => {
+    const [reminders, schedules, memories, activityEvents] = await Promise.all([
+      fetchReminders(),
+      fetchSchedules(workspace.scheduleFilters),
+      fetchMemories(),
+      fetchActivityEvents({ limit: 50 }),
+    ])
+
+    setWorkspace((currentWorkspace) => ({
+      ...currentWorkspace,
+      reminders: reminders.map(mapReminderResponseToViewModel),
+      schedules: schedules.map(mapScheduleResponseToViewModel),
+      memories: memories.map(mapMemoryResponseToViewModel),
+      activityEvents: activityEvents.map(mapActivityEventResponseToViewModel),
+      systemStatus: createSystemStatus('ONLINE'),
+    }))
+  }, [workspace.scheduleFilters])
+
+  const submitStreamMessage = useCallback(
     async (content: string, pendingAssistantMessageId: string) => {
+      let streamedContent = ''
+
       try {
-        const response = await sendChatMessage({
-          sessionId: workspace.activeSessionId
-            ? Number(workspace.activeSessionId)
-            : null,
-          message: content,
-        })
-        const assistantMessage = mapChatResponseToMessageViewModel(response)
+        const completeEvent = await streamChatMessage(
+          {
+            sessionId: workspace.activeSessionId
+              ? Number(workspace.activeSessionId)
+              : null,
+            message: content,
+          },
+          {
+            onMessage: (event) => {
+              streamedContent += event.chunk
+
+              setWorkspace((currentWorkspace) => ({
+                ...currentWorkspace,
+                activeSessionId: event.sessionId
+                  ? String(event.sessionId)
+                  : currentWorkspace.activeSessionId,
+                messages: replaceMessageById(
+                  currentWorkspace.messages,
+                  pendingAssistantMessageId,
+                  createStreamingAssistantMessage(
+                    pendingAssistantMessageId,
+                    streamedContent,
+                    event.sessionId,
+                    event.messageId,
+                  ),
+                ),
+              }))
+            },
+          },
+        )
 
         setWorkspace((currentWorkspace) => ({
           ...currentWorkspace,
-          activeSessionId: response.sessionId
-            ? String(response.sessionId)
+          activeSessionId: completeEvent.sessionId
+            ? String(completeEvent.sessionId)
             : currentWorkspace.activeSessionId,
           messages: replaceMessageById(
             currentWorkspace.messages,
             pendingAssistantMessageId,
-            assistantMessage,
+            mapChatStreamCompleteToMessageViewModel(completeEvent),
           ),
-          classifications: [mapChatResponseToClassification(response)],
+          classifications: [
+            {
+              taskType: 'CHAT',
+              statusLabel: 'COMPLETED',
+              label: '실시간 응답',
+            },
+          ],
           systemStatus: createSystemStatus('ONLINE'),
         }))
 
-        await reloadWorkspace(response.sessionId ? String(response.sessionId) : undefined)
+        await reloadWorkspace(
+          completeEvent.sessionId ? String(completeEvent.sessionId) : undefined,
+        )
       } catch (error) {
         setWorkspace((currentWorkspace) => ({
           ...currentWorkspace,
@@ -464,6 +598,73 @@ export function useChatPage(): UseChatPageResult {
       }
     },
     [reloadWorkspace, workspace.activeSessionId],
+  )
+
+  const submitJsonMessage = useCallback(
+    async (content: string, pendingAssistantMessageId: string) => {
+      try {
+        const response =
+          workspace.selectedExecutionMode === 'auto'
+            ? await sendChatMessage({
+                sessionId: workspace.activeSessionId
+                  ? Number(workspace.activeSessionId)
+                  : null,
+                message: content,
+              })
+            : await executeDirectTask(
+                resolveDirectExecutionMode(workspace.selectedExecutionMode),
+                { message: content },
+              )
+        const assistantMessage = mapChatResponseToMessageViewModel(response)
+
+        setWorkspace((currentWorkspace) => ({
+          ...currentWorkspace,
+          activeSessionId:
+            workspace.selectedExecutionMode === 'auto' && response.sessionId
+              ? String(response.sessionId)
+              : currentWorkspace.activeSessionId,
+          messages: replaceMessageById(
+            currentWorkspace.messages,
+            pendingAssistantMessageId,
+            assistantMessage,
+          ),
+          classifications: [mapChatResponseToClassification(response)],
+          systemStatus: createSystemStatus('ONLINE'),
+        }))
+
+        if (workspace.selectedExecutionMode === 'auto') {
+          await reloadWorkspace(
+            response.sessionId ? String(response.sessionId) : undefined,
+          )
+        } else {
+          await refreshDirectTaskResources().catch(markFailureStatus)
+        }
+      } catch (error) {
+        setWorkspace((currentWorkspace) => ({
+          ...currentWorkspace,
+          messages: replaceMessageById(
+            currentWorkspace.messages,
+            pendingAssistantMessageId,
+            createFailureAssistantMessage(getErrorMessage(error)),
+          ),
+          classifications: [
+            {
+              taskType: 'UNKNOWN',
+              statusLabel: 'FAILED',
+              label: '요청 실패',
+            },
+          ],
+          systemStatus: createSystemStatus('FAILED', getErrorMessage(error)),
+        }))
+      }
+    },
+    [
+      reloadWorkspace,
+      workspace.activeSessionId,
+      workspace.selectedExecutionMode,
+      refreshDirectTaskResources,
+      markFailureStatus,
+    ],
   )
 
   const handleSubmitMessage = useCallback(async () => {
@@ -489,11 +690,20 @@ export function useChatPage(): UseChatPageResult {
     }))
 
     try {
-      await submitJsonMessage(content, pendingAssistantMessageId)
+      if (workspace.selectedExecutionMode === 'stream') {
+        await submitStreamMessage(content, pendingAssistantMessageId)
+      } else {
+        await submitJsonMessage(content, pendingAssistantMessageId)
+      }
     } finally {
       setIsSubmitting(false)
     }
-  }, [composerText, submitJsonMessage])
+  }, [
+    composerText,
+    submitJsonMessage,
+    submitStreamMessage,
+    workspace.selectedExecutionMode,
+  ])
 
   const handleReminderFormChange = useCallback(
     (field: keyof ReminderFormViewModel, value: string) => {
@@ -503,6 +713,42 @@ export function useChatPage(): UseChatPageResult {
           ...currentWorkspace.reminderForm,
           [field]: value,
         },
+      }))
+    },
+    [],
+  )
+
+  const handleOpenReminderEditor = useCallback(() => {
+    setWorkspace((currentWorkspace) => ({
+      ...currentWorkspace,
+      reminderEditorMode: 'create',
+      reminderForm: createEmptyReminderForm(),
+    }))
+  }, [])
+
+  const handleCloseReminderEditor = useCallback(() => {
+    setWorkspace((currentWorkspace) => ({
+      ...currentWorkspace,
+      reminderEditorMode: 'closed',
+      reminderForm: createEmptyReminderForm(),
+    }))
+  }, [])
+
+  const handleReminderViewModeChange = useCallback((mode: ResourceViewMode) => {
+    setWorkspace((currentWorkspace) => ({
+      ...currentWorkspace,
+      reminderViewMode: mode,
+    }))
+  }, [])
+
+  const handleReminderCalendarMonthChange = useCallback(
+    (direction: CalendarMonthDirection) => {
+      setWorkspace((currentWorkspace) => ({
+        ...currentWorkspace,
+        reminderCalendarMonth: moveCalendarMonth(
+          currentWorkspace.reminderCalendarMonth,
+          direction,
+        ),
       }))
     },
     [],
@@ -530,6 +776,7 @@ export function useChatPage(): UseChatPageResult {
         reminders: reminders.map(mapReminderResponseToViewModel),
         activityEvents: activityEvents.map(mapActivityEventResponseToViewModel),
         reminderForm: createEmptyReminderForm(),
+        reminderEditorMode: 'closed',
         systemStatus: createSystemStatus('ONLINE'),
       }))
     } catch (error) {
@@ -589,6 +836,26 @@ export function useChatPage(): UseChatPageResult {
     }
   }, [markFailureStatus, workspace.scheduleFilters])
 
+  const handleScheduleViewModeChange = useCallback((mode: ResourceViewMode) => {
+    setWorkspace((currentWorkspace) => ({
+      ...currentWorkspace,
+      scheduleViewMode: mode,
+    }))
+  }, [])
+
+  const handleScheduleCalendarMonthChange = useCallback(
+    (direction: CalendarMonthDirection) => {
+      setWorkspace((currentWorkspace) => ({
+        ...currentWorkspace,
+        scheduleCalendarMonth: moveCalendarMonth(
+          currentWorkspace.scheduleCalendarMonth,
+          direction,
+        ),
+      }))
+    },
+    [],
+  )
+
   const handleScheduleFormChange = useCallback(
     (field: keyof ScheduleFormViewModel, value: string) => {
       setWorkspace((currentWorkspace) => ({
@@ -602,14 +869,31 @@ export function useChatPage(): UseChatPageResult {
     [],
   )
 
+  const handleOpenScheduleEditor = useCallback(() => {
+    setWorkspace((currentWorkspace) => ({
+      ...currentWorkspace,
+      scheduleEditorMode: 'create',
+      scheduleForm: createEmptyScheduleForm(),
+    }))
+  }, [])
+
+  const handleCloseScheduleEditor = useCallback(() => {
+    setWorkspace((currentWorkspace) => ({
+      ...currentWorkspace,
+      scheduleEditorMode: 'closed',
+      scheduleForm: createEmptyScheduleForm(),
+    }))
+  }, [])
+
   const handleEditSchedule = useCallback((schedule: ScheduleViewModel) => {
     setWorkspace((currentWorkspace) => ({
       ...currentWorkspace,
+      scheduleEditorMode: 'edit',
       scheduleForm: {
         editingId: schedule.id,
         title: schedule.title,
-        startAt: convertLabelToInputDateTime(schedule.startAtLabel),
-        endAt: convertLabelToInputDateTime(schedule.endAtLabel),
+        startAt: convertLocalDateTimeToInputValue(schedule.startAtValue),
+        endAt: convertLocalDateTimeToInputValue(schedule.endAtValue),
       },
     }))
   }, [])
@@ -617,6 +901,7 @@ export function useChatPage(): UseChatPageResult {
   const handleClearScheduleForm = useCallback(() => {
     setWorkspace((currentWorkspace) => ({
       ...currentWorkspace,
+      scheduleEditorMode: 'closed',
       scheduleForm: createEmptyScheduleForm(),
     }))
   }, [])
@@ -650,6 +935,7 @@ export function useChatPage(): UseChatPageResult {
         ...currentWorkspace,
         schedules: schedules.map(mapScheduleResponseToViewModel),
         scheduleForm: createEmptyScheduleForm(),
+        scheduleEditorMode: 'closed',
         systemStatus: createSystemStatus('ONLINE'),
       }))
     } catch (error) {
@@ -694,9 +980,26 @@ export function useChatPage(): UseChatPageResult {
     [],
   )
 
+  const handleOpenMemoryEditor = useCallback(() => {
+    setWorkspace((currentWorkspace) => ({
+      ...currentWorkspace,
+      memoryEditorMode: 'create',
+      memoryForm: createEmptyMemoryForm(),
+    }))
+  }, [])
+
+  const handleCloseMemoryEditor = useCallback(() => {
+    setWorkspace((currentWorkspace) => ({
+      ...currentWorkspace,
+      memoryEditorMode: 'closed',
+      memoryForm: createEmptyMemoryForm(),
+    }))
+  }, [])
+
   const handleEditMemory = useCallback((memory: MemoryViewModel) => {
     setWorkspace((currentWorkspace) => ({
       ...currentWorkspace,
+      memoryEditorMode: 'edit',
       memoryForm: {
         editingId: memory.id,
         content: memory.content,
@@ -707,6 +1010,7 @@ export function useChatPage(): UseChatPageResult {
   const handleClearMemoryForm = useCallback(() => {
     setWorkspace((currentWorkspace) => ({
       ...currentWorkspace,
+      memoryEditorMode: 'closed',
       memoryForm: createEmptyMemoryForm(),
     }))
   }, [])
@@ -733,6 +1037,7 @@ export function useChatPage(): UseChatPageResult {
         ...currentWorkspace,
         memories: memories.map(mapMemoryResponseToViewModel),
         memoryForm: createEmptyMemoryForm(),
+        memoryEditorMode: 'closed',
         systemStatus: createSystemStatus('ONLINE'),
       }))
     } catch (error) {
@@ -829,6 +1134,8 @@ export function useChatPage(): UseChatPageResult {
     isWorkspaceLoading,
     isSubmitting,
     isResourceSubmitting,
+    reminderCalendar,
+    scheduleCalendar,
     composerText,
     sessionTitleDraft,
     handleLoginEmailChange,
@@ -836,6 +1143,7 @@ export function useChatPage(): UseChatPageResult {
     handleLoginSubmit,
     handleLogout,
     handleViewSelect,
+    handleExecutionModeChange,
     handleComposerTextChange,
     handlePromptSelect,
     handleSubmitMessage,
@@ -845,16 +1153,26 @@ export function useChatPage(): UseChatPageResult {
     handleSessionTitleDraftChange,
     handleSaveSessionTitle,
     handleReminderFormChange,
+    handleOpenReminderEditor,
+    handleCloseReminderEditor,
+    handleReminderViewModeChange,
+    handleReminderCalendarMonthChange,
     handleCreateReminder,
     handleCancelReminder,
     handleScheduleFiltersChange,
     handleRefreshSchedules,
+    handleScheduleViewModeChange,
+    handleScheduleCalendarMonthChange,
     handleScheduleFormChange,
+    handleOpenScheduleEditor,
+    handleCloseScheduleEditor,
     handleEditSchedule,
     handleClearScheduleForm,
     handleSaveSchedule,
     handleDeleteSchedule,
     handleMemoryFormChange,
+    handleOpenMemoryEditor,
+    handleCloseMemoryEditor,
     handleEditMemory,
     handleClearMemoryForm,
     handleSaveMemory,
@@ -942,6 +1260,13 @@ function createEmptyWorkspace(): JarvisWorkspaceViewModel {
     classifications: [],
     reminders: [],
     schedules: [],
+    reminderViewMode: 'list',
+    scheduleViewMode: 'list',
+    reminderEditorMode: 'closed',
+    scheduleEditorMode: 'closed',
+    memoryEditorMode: 'closed',
+    reminderCalendarMonth: createCurrentCalendarMonthKey(),
+    scheduleCalendarMonth: createCurrentCalendarMonthKey(),
     memories: [],
     activityEvents: [],
     reminderForm: createEmptyReminderForm(),
@@ -958,6 +1283,8 @@ function createEmptyWorkspace(): JarvisWorkspaceViewModel {
     },
     quickPrompts,
     systemStatus: createSystemStatus('OFFLINE'),
+    executionModes: chatExecutionModes,
+    selectedExecutionMode: 'auto',
   }
 }
 
@@ -1048,6 +1375,7 @@ function mapReminderResponseToViewModel(
   return {
     id: String(response.id),
     title: response.content,
+    remindAtValue: response.remindAt,
     remindAtLabel: formatLocalDateTimeLabel(response.remindAt),
     statusLabel: response.status,
     createdAtLabel: formatLocalDateTimeLabel(response.createdAt),
@@ -1061,6 +1389,8 @@ function mapScheduleResponseToViewModel(
   return {
     id: String(response.id),
     title: response.title,
+    startAtValue: response.startAt,
+    endAtValue: response.endAt ?? '',
     startAtLabel: formatLocalDateTimeLabel(response.startAt),
     endAtLabel: formatLocalDateTimeLabel(response.endAt ?? ''),
     createdAtLabel: formatLocalDateTimeLabel(response.createdAt),
@@ -1106,6 +1436,93 @@ function mapWebPushResponseToViewModel(
     errorMessage: '',
     isSubmitting: false,
   }
+}
+
+function mapReminderViewModelToCalendarEvent(
+  reminder: ReminderViewModel,
+): CalendarEventViewModel {
+  return {
+    id: reminder.id,
+    kind: 'reminder',
+    title: reminder.title,
+    dateKey: createDateKeyFromLocalDateTime(reminder.remindAtValue),
+    timeLabel: createTimeLabelFromLocalDateTime(reminder.remindAtValue),
+    statusLabel: reminder.statusLabel,
+    sortValue: reminder.remindAtValue,
+  }
+}
+
+function mapScheduleViewModelToCalendarEvent(
+  schedule: ScheduleViewModel,
+): CalendarEventViewModel {
+  return {
+    id: schedule.id,
+    kind: 'schedule',
+    title: schedule.title,
+    dateKey: createDateKeyFromLocalDateTime(schedule.startAtValue),
+    timeLabel: createTimeRangeLabel(schedule.startAtValue, schedule.endAtValue),
+    statusLabel: '일정',
+    sortValue: schedule.startAtValue,
+  }
+}
+
+function createCalendarMonthViewModel(
+  monthKey: string,
+  events: CalendarEventViewModel[],
+  emptyMessage: string,
+): ResourceCalendarViewModel {
+  const { year, monthIndex } = parseCalendarMonthKey(monthKey)
+  const firstDate = new Date(year, monthIndex, 1)
+  const startDate = new Date(year, monthIndex, 1 - firstDate.getDay())
+  const todayKey = formatDateKey(new Date())
+  const eventsByDate = groupCalendarEventsByDate(events)
+  const days = Array.from({ length: calendarDayCount }, (_, index) => {
+    const date = new Date(startDate)
+
+    date.setDate(startDate.getDate() + index)
+
+    const dateKey = formatDateKey(date)
+
+    return {
+      dateKey,
+      dayOfMonthLabel: String(date.getDate()),
+      isCurrentMonth: date.getMonth() === monthIndex,
+      isToday: dateKey === todayKey,
+      events: eventsByDate.get(dateKey) ?? [],
+    }
+  })
+
+  return {
+    monthKey: formatCalendarMonthKey(firstDate),
+    monthLabel: `${year}년 ${monthIndex + 1}월`,
+    weekdayLabels: calendarWeekdayLabels,
+    days,
+    emptyMessage,
+  }
+}
+
+function groupCalendarEventsByDate(
+  events: CalendarEventViewModel[],
+): Map<string, CalendarEventViewModel[]> {
+  const eventsByDate = new Map<string, CalendarEventViewModel[]>()
+
+  events.forEach((event) => {
+    if (!event.dateKey) {
+      return
+    }
+
+    const dateEvents = eventsByDate.get(event.dateKey) ?? []
+
+    dateEvents.push(event)
+    eventsByDate.set(
+      event.dateKey,
+      dateEvents.sort((firstEvent, secondEvent) =>
+        firstEvent.sortValue.localeCompare(secondEvent.sortValue),
+      ),
+    )
+  })
+
+  return eventsByDate
 }
 
 function createInitialMessages(activeSessionId: string): ChatMessageViewModel[] {
@@ -1158,6 +1575,27 @@ function createPendingAssistantMessage(id: string): ChatMessageViewModel {
   }
 }
 
+function createStreamingAssistantMessage(
+  id: string,
+  content: string,
+  sessionId?: number | null,
+  messageId?: number | null,
+): ChatMessageViewModel {
+  return {
+    id,
+    sessionId: sessionId ? String(sessionId) : undefined,
+    role: 'assistant',
+    senderName: 'JARVIS',
+    avatarLabel: 'J',
+    content: content || PENDING_ASSISTANT_MESSAGE_CONTENT,
+    createdAtLabel: formatLocalDateTimeLabel(new Date().toISOString()),
+    taskTypeLabel: 'STREAM',
+    statusLabel: 'STREAMING',
+    isPending: true,
+    details: messageId ? [{ label: 'messageId', value: String(messageId) }] : [],
+  }
+}
+
 function createFailureAssistantMessage(message: string): ChatMessageViewModel {
   return {
     id: createLocalMessageId('assistant-error'),
@@ -1170,6 +1608,34 @@ function createFailureAssistantMessage(message: string): ChatMessageViewModel {
     statusLabel: 'FAILED',
     isPending: false,
     details: [{ label: 'apiHost', value: getJarvisApiBaseUrl() }],
+  }
+}
+
+function mapChatStreamCompleteToMessageViewModel(
+  response: ChatStreamCompleteEventDto,
+): ChatMessageViewModel {
+  return {
+    id: response.messageId
+      ? String(response.messageId)
+      : createLocalMessageId('assistant-stream'),
+    sessionId: response.sessionId ? String(response.sessionId) : undefined,
+    role: 'assistant',
+    senderName: 'JARVIS',
+    avatarLabel: 'J',
+    content: response.message,
+    createdAtLabel: formatLocalDateTimeLabel(new Date().toISOString()),
+    taskTypeLabel: 'STREAM',
+    statusLabel: 'COMPLETED',
+    isPending: false,
+    details: [
+      { label: 'event', value: 'complete' },
+      ...(response.sessionId
+        ? [{ label: 'sessionId', value: String(response.sessionId) }]
+        : []),
+      ...(response.messageId
+        ? [{ label: 'messageId', value: String(response.messageId) }]
+        : []),
+    ],
   }
 }
 
@@ -1219,11 +1685,31 @@ function createChatResponseDetails(
 
   if (response.data && typeof response.data === 'object') {
     Object.entries(response.data).forEach(([key, value]) => {
-      details.push({ label: key, value: String(value) })
+      details.push({ label: key, value: formatDetailValue(value) })
     })
   }
 
   return details
+}
+
+function formatDetailValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return ''
+  }
+
+  if (typeof value === 'string') {
+    return value
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
 }
 
 function replaceMessageById(
@@ -1304,6 +1790,12 @@ function createMessageMetadataDetails(
 function createTaskTypeLabel(taskType: ChatTaskType): string {
   const labelsByTaskType: Record<ChatTaskType, string> = {
     CHAT: '일반 채팅',
+    REMINDER_CREATE: '리마인더 생성',
+    SCHEDULE_CREATE: '일정 생성',
+    SCHEDULE_QUERY: '일정 조회',
+    MEMORY_WRITE: '메모리 저장',
+    MEMORY_QUERY: '메모리 조회',
+    NEWS_SUMMARY: '뉴스 요약',
     REMINDER: '리마인더',
     SCHEDULE: '일정',
     MEMORY: '메모리',
@@ -1311,6 +1803,16 @@ function createTaskTypeLabel(taskType: ChatTaskType): string {
   }
 
   return labelsByTaskType[taskType]
+}
+
+function resolveDirectExecutionMode(
+  executionMode: ChatExecutionMode,
+): DirectTaskExecutionMode {
+  if (executionMode === 'auto' || executionMode === 'stream') {
+    throw new Error('직접 실행 mode가 아닙니다.')
+  }
+
+  return executionMode
 }
 
 function createActivityTypeLabel(activityType: ActivityEventType): string {
@@ -1488,12 +1990,100 @@ function getNotificationPermissionLabel(): string {
   return Notification.permission
 }
 
-function convertLabelToInputDateTime(label: string): string {
-  if (!label) {
+function moveCalendarMonth(
+  monthKey: string,
+  direction: CalendarMonthDirection,
+): string {
+  if (direction === 'today') {
+    return createCurrentCalendarMonthKey()
+  }
+
+  const { year, monthIndex } = parseCalendarMonthKey(monthKey)
+  const nextDate = new Date(
+    year,
+    monthIndex + (direction === 'next' ? 1 : -1),
+    1,
+  )
+
+  return formatCalendarMonthKey(nextDate)
+}
+
+function parseCalendarMonthKey(monthKey: string): {
+  year: number
+  monthIndex: number
+} {
+  const match = /^(\d{4})-(\d{2})$/.exec(monthKey)
+
+  if (!match) {
+    const currentDate = new Date()
+
+    return {
+      year: currentDate.getFullYear(),
+      monthIndex: currentDate.getMonth(),
+    }
+  }
+
+  const year = Number(match[1])
+  const month = Number(match[2])
+
+  if (!Number.isFinite(year) || month < 1 || month > 12) {
+    const currentDate = new Date()
+
+    return {
+      year: currentDate.getFullYear(),
+      monthIndex: currentDate.getMonth(),
+    }
+  }
+
+  return {
+    year,
+    monthIndex: month - 1,
+  }
+}
+
+function createCurrentCalendarMonthKey(): string {
+  return formatCalendarMonthKey(new Date())
+}
+
+function formatCalendarMonthKey(date: Date): string {
+  return `${date.getFullYear()}-${padDateNumber(date.getMonth() + 1)}`
+}
+
+function formatDateKey(date: Date): string {
+  return [
+    date.getFullYear(),
+    padDateNumber(date.getMonth() + 1),
+    padDateNumber(date.getDate()),
+  ].join('-')
+}
+
+function createDateKeyFromLocalDateTime(value: string): string {
+  return value.length >= 10 ? value.slice(0, 10) : ''
+}
+
+function createTimeRangeLabel(startAt: string, endAt: string): string {
+  const startTime = createTimeLabelFromLocalDateTime(startAt)
+  const endTime = createTimeLabelFromLocalDateTime(endAt)
+
+  if (!endTime) {
+    return startTime || '시간 없음'
+  }
+
+  return `${startTime || '시간 없음'}-${endTime}`
+}
+
+function createTimeLabelFromLocalDateTime(value: string): string {
+  const label = formatLocalDateTimeLabel(value)
+
+  return label.length > 11 ? label.slice(11) : ''
+}
+
+function convertLocalDateTimeToInputValue(value: string): string {
+  if (!value) {
     return ''
   }
 
-  return label.replace(' ', 'T')
+  return value.replace(' ', 'T').slice(0, 16)
 }
 
 function formatLocalDateTimeLabel(value: string): string {
@@ -1502,6 +2092,10 @@ function formatLocalDateTimeLabel(value: string): string {
   }
 
   return value.replace('T', ' ').slice(0, 16)
+}
+
+function padDateNumber(value: number): string {
+  return String(value).padStart(2, '0')
 }
 
 function createLocalMessageId(prefix: string): string {

@@ -1,4 +1,5 @@
 import type { ChatMessageViewModel } from '../types/chat'
+import { MarkdownMessageContent } from './MarkdownMessageContent'
 
 interface MessageBubbleProps {
   message: ChatMessageViewModel
@@ -16,21 +17,22 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   ]
     .filter(Boolean)
     .join(' ')
+  const shouldShowDiagnostics = isUserMessage && message.details.length > 0
 
   return (
     <article className={className} aria-busy={message.isPending}>
       {!isUserMessage && <div className="avatar">{message.avatarLabel}</div>}
       <div className="message-body">
+        {isUserMessage ? (
+          <p className="plain-message-content">{message.content}</p>
+        ) : (
+          <MarkdownMessageContent content={message.content} />
+        )}
         <div className="message-meta">
           <span>{message.senderName}</span>
           <span>{message.createdAtLabel}</span>
         </div>
-        <p>{message.content}</p>
-        <div className="tag-row">
-          <span>{message.taskTypeLabel}</span>
-          <span>{message.statusLabel}</span>
-        </div>
-        {message.details.length > 0 && (
+        {shouldShowDiagnostics && (
           <dl className="detail-grid">
             {message.details.map((detail) => (
               <div key={`${message.id}-${detail.label}`}>

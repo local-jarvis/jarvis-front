@@ -70,20 +70,25 @@
 - Steps:
   1. hook이 `GET /api/v1/chat-sessions`로 세션 목록을 조회한다.
   2. 사용자가 세션을 선택하면 hook이 `GET /api/v1/chat-sessions/{id}/messages`를 호출한다.
-  3. 사용자가 메시지를 제출하면 hook이 사용자 optimistic message와 pending assistant message를 추가한다.
-  4. 사용자가 textarea에서 Enter를 누르면 hook submit intent가 실행되고, Shift+Enter는 줄바꿈으로 처리한다.
-  5. service가 `POST /api/v1/chat`을 호출하고 응답을 assistant message로 변환한다.
-  6. 응답에 새 `sessionId`가 있으면 hook이 active session을 갱신하고 workspace를 다시 조회한다.
-  7. 사용자가 세션 제목을 저장하면 `PATCH /api/v1/chat-sessions/{id}`를 호출한다.
-  8. 사용자가 세션 삭제를 선택하면 `DELETE /api/v1/chat-sessions/{id}`를 호출한다.
+  3. 사용자가 ChatComposer segmented control에서 `auto` 또는 직접 task 실행 방식을 선택한다.
+  4. 사용자가 메시지를 제출하면 hook이 사용자 optimistic message와 pending assistant message를 추가한다.
+  5. 사용자가 textarea에서 Enter를 누르면 hook submit intent가 실행되고, Shift+Enter는 줄바꿈으로 처리한다.
+  6. 실행 방식이 `auto`이면 service가 `POST /api/v1/chat`을 호출하고 응답을 assistant message로 변환한다.
+  7. 실행 방식이 `stream`이면 service가 `POST /api/v1/chat/stream`을 호출하고 SSE `message` chunk를 hook callback으로 전달한다.
+  8. hook은 stream chunk를 pending assistant message에 누적하고, `complete` event 후 completed assistant message를 표시한다.
+  9. 실행 방식이 직접 task이면 service가 선택된 `/api/v1/task-executions/*` endpoint를 호출하고 응답을 임시 assistant message로 변환한다.
+  10. `POST /api/v1/chat` 또는 `POST /api/v1/chat/stream` 응답에 새 `sessionId`가 있으면 hook이 active session을 갱신하고 workspace를 다시 조회한다.
+  11. 직접 task 응답은 chat session/message를 backend에 저장하지 않으므로 hook이 리마인더, 일정, 메모리, activity 목록만 다시 조회하고 현재 화면 메시지는 유지한다.
+  12. 사용자가 세션 제목을 저장하면 `PATCH /api/v1/chat-sessions/{id}`를 호출한다.
+  13. 사용자가 세션 삭제를 선택하면 `DELETE /api/v1/chat-sessions/{id}`를 호출한다.
 - Validation: 메시지 trim 결과가 비어 있으면 API를 호출하지 않는다. Enter는 전송, Shift+Enter는 줄바꿈이다.
 - Empty state: 세션 또는 메시지가 없으면 안내 assistant message를 표시한다.
 - Error state: chat 실패 시 pending assistant message를 실패 메시지로 교체하고 system status를 `FAILED`로 표시한다.
 - Timeout behavior: `POST /api/v1/chat`은 프론트 service 경계에서 120초를 초과하면 timeout 실패로 처리한다.
-- Permission behavior: 모든 chat/session API는 authenticated이다.
+- Permission behavior: 모든 chat/session/task execution API는 authenticated이다.
 - Retry or recovery: 메시지를 다시 보내거나 세션을 다시 선택한다.
-- Side effects: React state의 optimistic message, backend chat session/message 저장 또는 삭제.
-- Related API: chat session endpoints, `POST /api/v1/chat`
+- Side effects: React state의 optimistic/streaming message, backend chat session/message 저장 또는 삭제, 직접 task 실행 시 관련 리소스 row 생성 또는 조회.
+- Related API: chat session endpoints, `POST /api/v1/chat`, `POST /api/v1/chat/stream`, `POST /api/v1/task-executions/*`
 - Related DB tables: 없음.
 
 ## Reminder Management
@@ -92,16 +97,20 @@
 - Preconditions: 사용자가 로그인되어 있다.
 - Steps:
   1. 초기 workspace load에서 `GET /api/v1/reminders`로 pending 리마인더를 조회한다.
-  2. 사용자가 content와 remindAt을 입력하고 생성한다.
-  3. hook이 빈 입력을 검증한 뒤 service가 `POST /api/v1/reminders`를 호출한다.
-  4. 생성 후 hook이 reminders와 activity events를 다시 조회한다.
-  5. 사용자가 취소를 누르면 service가 `PATCH /api/v1/reminders/{id}/cancel`을 호출한다.
+  2. 사용자가 `+ 리마인더`를 누르면 hook이 `reminderEditorMode=create`로 전환하고 빈 form을 표시한다.
+  3. 사용자가 content와 remindAt을 입력하고 생성한다.
+  4. hook이 빈 입력을 검증한 뒤 service가 `POST /api/v1/reminders`를 호출한다.
+  5. 생성 후 hook이 reminders와 activity events를 다시 조회하고 editor를 닫는다.
+  6. 사용자가 editor 닫기 또는 취소를 누르면 hook이 form을 초기화하고 `reminderEditorMode=closed`로 돌아간다.
+  7. 사용자가 취소를 누르면 service가 `PATCH /api/v1/reminders/{id}/cancel`을 호출한다.
+  8. 사용자가 리스트/캘린더 표시 방식을 전환하면 hook이 `reminderViewMode`만 변경한다.
+  9. 캘린더에서 이전/오늘/다음을 누르면 hook이 `reminderCalendarMonth`를 변경하고 기존 reminders ViewModel을 월간 달력 ViewModel로 다시 계산한다.
 - Validation: content와 remindAt이 비어 있으면 API를 호출하지 않는다.
-- Empty state: pending 리마인더가 없으면 빈 상태 문구를 표시한다.
+- Empty state: pending 리마인더가 없으면 리스트 빈 상태 문구를 표시하고, 캘린더 월에 항목이 없으면 캘린더 빈 상태 문구를 표시한다.
 - Error state: 실패 시 system status를 `FAILED`로 표시한다.
 - Permission behavior: reminder API는 authenticated이다.
 - Retry or recovery: 사용자가 다시 생성/취소한다.
-- Side effects: backend reminder 생성 또는 취소.
+- Side effects: backend reminder 생성 또는 취소. editor 열기/닫기, 리스트/캘린더 전환, 캘린더 월 이동은 API 호출 없이 React state만 변경한다.
 - Related API: `GET /api/v1/reminders`, `POST /api/v1/reminders`, `PATCH /api/v1/reminders/{id}/cancel`
 - Related DB tables: 없음.
 
@@ -112,15 +121,21 @@
 - Steps:
   1. 초기 workspace load에서 `GET /api/v1/schedules`를 호출한다.
   2. 사용자가 from/to 필터를 입력하고 조회하면 query params와 함께 다시 조회한다.
-  3. 사용자가 제목과 시작 시각을 입력하고 저장하면 `POST /api/v1/schedules`를 호출한다.
-  4. 기존 일정을 수정 상태로 불러온 뒤 저장하면 `PATCH /api/v1/schedules/{id}`를 호출한다.
-  5. 삭제를 누르면 `DELETE /api/v1/schedules/{id}`를 호출한다.
+  3. 사용자가 `+ 일정`을 누르면 hook이 `scheduleEditorMode=create`로 전환하고 빈 form을 표시한다.
+  4. 사용자가 제목과 시작 시각을 입력하고 저장하면 `POST /api/v1/schedules`를 호출한다.
+  5. 기존 일정의 수정을 누르면 hook이 `scheduleEditorMode=edit`로 전환하고 기존 값을 form에 복사한다.
+  6. 수정 editor에서 저장하면 `PATCH /api/v1/schedules/{id}`를 호출한다.
+  7. 저장 후 hook이 schedules를 다시 조회하고 editor를 닫는다.
+  8. 사용자가 editor 닫기 또는 취소를 누르면 hook이 form을 초기화하고 `scheduleEditorMode=closed`로 돌아간다.
+  9. 삭제를 누르면 `DELETE /api/v1/schedules/{id}`를 호출한다.
+  10. 사용자가 리스트/캘린더 표시 방식을 전환하면 hook이 `scheduleViewMode`만 변경한다.
+  11. 캘린더에서 이전/오늘/다음을 누르면 hook이 `scheduleCalendarMonth`를 변경하고 기존 schedules ViewModel을 월간 달력 ViewModel로 다시 계산한다.
 - Validation: title과 startAt이 비어 있으면 저장 API를 호출하지 않는다.
-- Empty state: 조회된 일정이 없으면 빈 상태 문구를 표시한다.
+- Empty state: 조회된 일정이 없으면 리스트 빈 상태 문구를 표시하고, 캘린더 월에 항목이 없으면 캘린더 빈 상태 문구를 표시한다.
 - Error state: 실패 시 system status를 `FAILED`로 표시한다.
 - Permission behavior: schedule API는 authenticated이다.
 - Retry or recovery: 사용자가 form 값을 수정하고 다시 저장하거나 조회한다.
-- Side effects: backend schedule 생성/수정/삭제.
+- Side effects: backend schedule 생성/수정/삭제. editor 열기/닫기, 리스트/캘린더 전환, 캘린더 월 이동은 API 호출 없이 React state만 변경한다.
 - Related API: schedule endpoints
 - Related DB tables: 없음.
 
@@ -130,15 +145,19 @@
 - Preconditions: 사용자가 로그인되어 있다.
 - Steps:
   1. 초기 workspace load에서 `GET /api/v1/memories`를 호출한다.
-  2. 사용자가 내용을 입력하고 저장하면 `POST /api/v1/memories`를 호출한다.
-  3. 기존 memory를 수정 상태로 불러온 뒤 저장하면 `PATCH /api/v1/memories/{id}`를 호출한다.
-  4. 삭제를 누르면 `DELETE /api/v1/memories/{id}`를 호출한다.
+  2. 사용자가 `+ 메모리`를 누르면 hook이 `memoryEditorMode=create`로 전환하고 빈 form을 표시한다.
+  3. 사용자가 내용을 입력하고 저장하면 `POST /api/v1/memories`를 호출한다.
+  4. 기존 memory의 수정을 누르면 hook이 `memoryEditorMode=edit`로 전환하고 기존 값을 form에 복사한다.
+  5. 수정 editor에서 저장하면 `PATCH /api/v1/memories/{id}`를 호출한다.
+  6. 저장 후 hook이 memories를 다시 조회하고 editor를 닫는다.
+  7. 사용자가 editor 닫기 또는 취소를 누르면 hook이 form을 초기화하고 `memoryEditorMode=closed`로 돌아간다.
+  8. 삭제를 누르면 `DELETE /api/v1/memories/{id}`를 호출한다.
 - Validation: content trim 결과가 비어 있으면 API를 호출하지 않는다.
 - Empty state: memory가 없으면 빈 상태 문구를 표시한다.
 - Error state: 실패 시 system status를 `FAILED`로 표시한다.
 - Permission behavior: memory API는 authenticated이다.
 - Retry or recovery: 사용자가 다시 저장한다.
-- Side effects: backend memory 생성/수정/soft delete.
+- Side effects: backend memory 생성/수정/soft delete. editor 열기/닫기는 API 호출 없이 React state만 변경한다.
 - Related API: memory endpoints
 - Related DB tables: 없음.
 

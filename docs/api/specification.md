@@ -15,7 +15,7 @@
 
 | Enum | Values |
 | --- | --- |
-| `TaskType` | `CHAT`, `REMINDER`, `SCHEDULE`, `MEMORY` |
+| `TaskType` | `CHAT`, `REMINDER_CREATE`, `SCHEDULE_CREATE`, `SCHEDULE_QUERY`, `MEMORY_WRITE`, `MEMORY_QUERY`, `NEWS_SUMMARY`, legacy `REMINDER`, `SCHEDULE`, `MEMORY` |
 | `ChatStatus` | `SUCCESS`, `FAILED`, `NEED_CONFIRMATION`, `NOT_IMPLEMENTED` |
 | `ChatRole` | `USER`, `ASSISTANT`, `SYSTEM` |
 | `ChatMessageStatus` | `STREAMING`, `COMPLETED`, `FAILED` |
@@ -32,7 +32,7 @@
 | `message` | string | yes | no | 사용자에게 보여줄 처리 결과 메시지 | n/a |
 | `taskType` | string | yes | no | 작업 분류 결과 | `TaskType` |
 | `status` | string | yes | no | 처리 결과 상태 | `ChatStatus` |
-| `data` | object | no | yes | 작업별 상세 데이터 | reminder, schedule, memory 또는 null |
+| `data` | object | no | yes | 작업별 상세 데이터 | reminder, schedule, memory, schedule query result, news summary result 또는 null |
 | `createdAt` | string, LocalDateTime | yes | no | 응답 생성 시각 | n/a |
 
 ### `ChatSessionResponseDTO`
@@ -73,7 +73,7 @@
 | `id` | number | yes | no | 일정 식별자 |
 | `title` | string | yes | no | 일정 제목 |
 | `startAt` | string, LocalDateTime | yes | no | 일정 시작 시각 |
-| `endAt` | string, LocalDateTime | no | yes | 일정 종료 시각 |
+| `endAt` | string, LocalDateTime | no | yes | 일정 종료 시각. 신규 생성/수정에서 생략하면 `startAt` 날짜의 23:59로 저장되며 legacy row는 null일 수 있음 |
 | `createdAt` | string, LocalDateTime | yes | no | row 최초 생성 시각 |
 
 ### `UserMemoryResponseDTO`
@@ -254,6 +254,117 @@
 - Status codes: 200, 400, 401, 404, 500
 - Error cases: message validation 실패, 인증 실패, 소유 세션 없음, 120초 초과, LLM/API/처리 예외
 
+### POST `/api/v1/chat/stream`
+- 설명: `POST /api/v1/chat`과 같은 task flow를 실행하되 assistant 응답을 Server-Sent Events로 전송한다.
+- 인증: authenticated
+- Produces: `text/event-stream`
+- Request body: `ChatRequestDTO`
+- Event types:
+
+| Event | Data fields | Meaning |
+| --- | --- | --- |
+| `heartbeat` | `sessionId` | stream 연결 유지 |
+| `message` | `sessionId`, `messageId`, `chunk` | assistant 응답 chunk |
+| `complete` | `sessionId`, `messageId`, `message` | 최종 assistant 응답 |
+| `error` | `sessionId`, `messageId`, `message` | stream 처리 실패 |
+
+- Status codes: 200, 400, 401, 404, 500
+- Error cases: message validation 실패, 인증 실패, 소유 세션 없음, stream 처리 예외
+- Frontend note: ChatComposer 실행 방식이 `stream`이면 `jarvisApiService`가 fetch `ReadableStream`으로 이 endpoint를 호출하고, hook이 `message` chunk를 pending assistant message에 누적 표시한 뒤 `complete` event 후 workspace를 다시 조회한다.
+
+### 분류 생략 Task 실행 API
+
+아래 endpoint는 `POST /api/v1/chat`의 LLM task classification, chat session 자동 생성, chat message 저장을 수행하지 않는다. 요청 자연어는 별도 message row로 저장하지 않고, endpoint가 지정한 task만 실행한다.
+
+공통 Request body: `TaskExecutionRequestDTO`
+
+| Field | Type | Required | Nullable | Meaning |
+| --- | --- | --- | --- | --- |
+| `message` | string | yes | no | task에 사용할 자연어 입력 |
+
+공통 Response body: `ChatResponseDTO`
+
+| Field | Type | Required | Nullable | Meaning |
+| --- | --- | --- | --- | --- |
+| `sessionId` | number | no | yes | 항상 `null` |
+| `messageId` | number | no | yes | 항상 `null` |
+| `message` | string | yes | no | task 실행 결과 안내 문구 |
+| `taskType` | string | yes | no | endpoint에 고정된 `TaskType` |
+| `status` | string | yes | no | `SUCCESS`, `NEED_CONFIRMATION`, `FAILED` |
+| `data` | object | no | yes | task별 결과 DTO 또는 null |
+| `createdAt` | string, LocalDateTime | yes | no | 응답 생성 시각 |
+
+### POST `/api/v1/task-executions/chat`
+- 설명: 분류 없이 `CHAT` task만 실행한다.
+- 인증: authenticated
+- Request body: `TaskExecutionRequestDTO`
+- Response body: `ChatResponseDTO(taskType=CHAT, data=null)`
+- Status codes: 200, 400, 401, 500
+- Error cases: validation 실패, 인증 실패, LLM/API/처리 예외
+
+### POST `/api/v1/task-executions/reminder-create`
+- 설명: 분류 없이 `REMINDER_CREATE` task만 실행하고, 성공 시 현재 사용자 리마인더를 생성한다.
+- 인증: authenticated
+- Request body: `TaskExecutionRequestDTO`
+- Response body: `ChatResponseDTO(taskType=REMINDER_CREATE, data=ReminderResponseDTO 또는 reason object)`
+- Status codes: 200, 400, 401, 500
+- Error cases: validation 실패, 인증 실패, 시간/내용 추출 실패, LLM/API/처리 예외
+
+### POST `/api/v1/task-executions/schedule-create`
+- 설명: 분류 없이 `SCHEDULE_CREATE` task만 실행하고, 성공 시 현재 사용자 일정을 생성한다.
+- 인증: authenticated
+- Request body: `TaskExecutionRequestDTO`
+- Response body: `ChatResponseDTO(taskType=SCHEDULE_CREATE, data=ScheduleResponseDTO 또는 reason object)`
+- Status codes: 200, 400, 401, 500
+- Error cases: validation 실패, 인증 실패, 시간/제목 추출 실패, LLM/API/처리 예외
+
+### POST `/api/v1/task-executions/schedule-query`
+- 설명: 분류 없이 `SCHEDULE_QUERY` task만 실행하고, Asia/Seoul 기준 자연어 기간에 맞는 현재 사용자 일정을 조회한다.
+- 인증: authenticated
+- Request body: `TaskExecutionRequestDTO`
+- Response body: `ChatResponseDTO(taskType=SCHEDULE_QUERY, data=ScheduleQueryResultDTO)`
+- Status codes: 200, 400, 401, 500
+- Error cases: validation 실패, 인증 실패, LLM/API/처리 예외
+
+### POST `/api/v1/task-executions/memory-write`
+- 설명: 분류 없이 `MEMORY_WRITE` task만 실행하고, 성공 시 현재 사용자 memory를 생성한다.
+- 인증: authenticated
+- Request body: `TaskExecutionRequestDTO`
+- Response body: `ChatResponseDTO(taskType=MEMORY_WRITE, data=UserMemoryResponseDTO 또는 reason object)`
+- Status codes: 200, 400, 401, 500
+- Error cases: validation 실패, 인증 실패, 저장 내용 추출 실패, LLM/API/처리 예외
+
+### POST `/api/v1/task-executions/memory-query`
+- 설명: 분류 없이 `MEMORY_QUERY` task만 실행하고, memory를 수정하지 않는다.
+- 인증: authenticated
+- Request body: `TaskExecutionRequestDTO`
+- Response body: `ChatResponseDTO(taskType=MEMORY_QUERY, data=null)`
+- Status codes: 200, 400, 401, 500
+- Error cases: validation 실패, 인증 실패, LLM/API/처리 예외
+
+### POST `/api/v1/task-executions/news-summary`
+- 설명: 분류 없이 `NEWS_SUMMARY` task만 실행하고, 네이버 뉴스 검색 결과를 LLM으로 요약한다. 뉴스 결과와 요약은 DB에 저장하지 않는다.
+- 인증: authenticated
+- Request body: `TaskExecutionRequestDTO`
+- Response body: `ChatResponseDTO(taskType=NEWS_SUMMARY, data=NewsSummaryResultDTO)`
+- Status codes: 200, 400, 401, 500
+- Error cases: validation 실패, 인증 실패, 검색 키워드 누락, 네이버 검색 API 실패, LLM/API/처리 예외
+
+### `NewsSummaryResultDTO`
+| Field | Type | Required | Nullable | Meaning |
+| --- | --- | --- | --- | --- |
+| `keyword` | string | yes | no | 실제 뉴스 검색 키워드 |
+| `requestedCount` | number | yes | no | 요청한 검색 결과 수 |
+| `collectedCount` | number | yes | no | 수집된 기사 수 |
+| `summary` | string | yes | no | 뉴스 제목 기반 이슈 요약 |
+| `articles` | `NewsArticleDTO[]` | yes | no | 검색된 기사 제목과 URL 목록 |
+
+### `NewsArticleDTO`
+| Field | Type | Required | Nullable | Meaning |
+| --- | --- | --- | --- | --- |
+| `title` | string | yes | no | HTML tag/entity가 제거된 기사 제목 |
+| `url` | string | yes | no | 뉴스 원문 또는 네이버 뉴스 URL |
+
 ### GET `/api/v1/reminders`
 - 설명: 현재 사용자의 `PENDING` 리마인더 목록을 `remindAt` 오름차순으로 조회한다.
 - 인증: authenticated
@@ -286,6 +397,9 @@
 ### GET `/api/v1/schedules`
 - 설명: 현재 사용자의 일정 목록을 `startAt` 오름차순으로 조회한다.
 - 인증: authenticated
+- 동작:
+  - 종료 시각이 지난 일정은 backend scheduler에 의해 물리 삭제될 수 있다.
+  - `endAt`이 null인 legacy row는 자동 삭제 대상이 아니며 현재 사용자 소유 row만 조회한다.
 - Query params:
 
 | Field | Type | Required | Nullable | Meaning |
@@ -306,17 +420,17 @@
 | --- | --- | --- | --- | --- |
 | `title` | string | yes | no | 일정 제목 |
 | `startAt` | string, LocalDateTime | yes | no | 일정 시작 시각 |
-| `endAt` | string, LocalDateTime | no | yes | 일정 종료 시각 |
+| `endAt` | string, LocalDateTime | no | yes | 일정 종료 시각. 생략하면 backend가 `startAt` 날짜의 23:59로 저장 |
 
 - Response body: `ScheduleResponseDTO`
 - Status codes: 201, 400, 401, 500
 - Error cases: validation 실패, 인증 실패, 서버 오류
 
 ### PATCH `/api/v1/schedules/{id}`
-- 설명: 현재 사용자가 소유한 일정을 수정한다.
+- 설명: 현재 사용자가 소유한 일정을 수정한다. 현재 backend 계약은 `title`, `startAt`을 필수로 받는 전체 갱신형 PATCH이며, `endAt` 생략 시 `startAt` 날짜의 23:59로 저장한다.
 - 인증: authenticated
 - Path params: `id`
-- Request body: `ScheduleCreateRequestDTO`와 동일하며 현재 backend 계약은 `title`, `startAt`을 필수로 받는다.
+- Request body: `ScheduleCreateRequestDTO`와 동일하다.
 - Response body: `ScheduleResponseDTO`
 - Status codes: 200, 400, 401, 404, 500
 - Error cases: validation 실패, 인증 실패, 소유 일정 없음, 서버 오류
@@ -344,17 +458,20 @@
 - Error cases: 서버 오류
 
 ### POST `/api/v1/web-push/subscriptions`
-- 설명: 브라우저 Web Push subscription 정보를 현재 사용자에게 저장한다.
+- 설명: 브라우저 Web Push subscription 정보를 현재 사용자에게 저장하거나 같은 subscription fingerprint의 키 정보를 갱신한다.
 - 인증: authenticated
 - Request body:
 
 | Field | Type | Required | Nullable | Meaning |
 | --- | --- | --- | --- | --- |
-| `endpoint` | string | yes | no | PushSubscription endpoint URL |
-| `p256dh` | string | yes | no | PushSubscription `keys.p256dh` 값 |
-| `auth` | string | yes | no | PushSubscription `keys.auth` 값 |
+| `endpoint` | string | yes | no | PushSubscription endpoint URL. 최대 2048자 |
+| `p256dh` | string | yes | no | PushSubscription `keys.p256dh` 값. 최대 1000자 |
+| `auth` | string | yes | no | PushSubscription `keys.auth` 값. 최대 500자 |
 
 - Response body: `WebPushSubscriptionResponseDTO`
+- 동작:
+  - 서버는 `endpoint`, `p256dh`, `auth` 조합으로 `subscription_hash`를 계산한다.
+  - endpoint 단독으로 기존 row를 덮어쓰지 않으므로 같은 사용자 PC와 모바일 구독이 동시에 active 상태로 유지될 수 있다.
 - Status codes: 201, 400, 401, 500
 - Error cases: validation 실패, 인증 실패, 서버 오류
 
@@ -416,5 +533,6 @@
 ## 프론트 매핑
 - `jarvis-frontend/src/services/jarvisApiService.ts`가 모든 HTTP boundary와 token header 부착을 소유한다.
 - `jarvis-frontend/src/hooks/useChatPage.ts`가 DTO를 ViewModel로 변환한다.
+- ChatComposer의 실행 방식이 `auto`이면 `POST /api/v1/chat`, `stream`이면 `POST /api/v1/chat/stream`, 직접 실행 모드이면 `/api/v1/task-executions/*` endpoint를 호출한다.
 - API 실패는 hook에서 `systemStatus.healthLabel = FAILED`와 화면별 실패 메시지로 정규화한다.
 - Web Push browser API 연동은 hook에서 수행하고, subscription 저장 HTTP 호출만 service를 거친다.

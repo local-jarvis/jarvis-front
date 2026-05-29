@@ -15,6 +15,14 @@ Base URL은 `jarvis-frontend/.env`의 `VITE_JARVIS_API_BASE_URL` 값이다.
 | DELETE | `${VITE_JARVIS_API_BASE_URL}/api/v1/chat-sessions/{id}` | authenticated | 채팅 세션과 내부 메시지 삭제 |
 | GET | `${VITE_JARVIS_API_BASE_URL}/api/v1/chat-sessions/{id}/messages` | authenticated | 채팅 세션 메시지 목록 조회 |
 | POST | `${VITE_JARVIS_API_BASE_URL}/api/v1/chat` | authenticated | 사용자 메시지 전송 및 작업 실행 결과 수신 |
+| POST | `${VITE_JARVIS_API_BASE_URL}/api/v1/chat/stream` | authenticated | 사용자 메시지 전송 및 SSE assistant 응답 수신 |
+| POST | `${VITE_JARVIS_API_BASE_URL}/api/v1/task-executions/chat` | authenticated | 분류 없이 일반 채팅 task 직접 실행 |
+| POST | `${VITE_JARVIS_API_BASE_URL}/api/v1/task-executions/reminder-create` | authenticated | 분류 없이 리마인더 생성 task 직접 실행 |
+| POST | `${VITE_JARVIS_API_BASE_URL}/api/v1/task-executions/schedule-create` | authenticated | 분류 없이 일정 생성 task 직접 실행 |
+| POST | `${VITE_JARVIS_API_BASE_URL}/api/v1/task-executions/schedule-query` | authenticated | 분류 없이 일정 조회 task 직접 실행 |
+| POST | `${VITE_JARVIS_API_BASE_URL}/api/v1/task-executions/memory-write` | authenticated | 분류 없이 memory 쓰기 task 직접 실행 |
+| POST | `${VITE_JARVIS_API_BASE_URL}/api/v1/task-executions/memory-query` | authenticated | 분류 없이 memory 조회 task 직접 실행 |
+| POST | `${VITE_JARVIS_API_BASE_URL}/api/v1/task-executions/news-summary` | authenticated | 분류 없이 뉴스 검색 요약 task 직접 실행 |
 | GET | `${VITE_JARVIS_API_BASE_URL}/api/v1/reminders` | authenticated | 대기 중인 리마인더 목록 조회 |
 | POST | `${VITE_JARVIS_API_BASE_URL}/api/v1/reminders` | authenticated | 리마인더 직접 생성 |
 | PATCH | `${VITE_JARVIS_API_BASE_URL}/api/v1/reminders/{id}/cancel` | authenticated | 리마인더 취소 |

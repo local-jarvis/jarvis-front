@@ -1,10 +1,17 @@
-import type { QuickPromptViewModel } from '../types/chat'
+import type {
+  ChatExecutionMode,
+  ChatExecutionModeViewModel,
+  QuickPromptViewModel,
+} from '../types/chat'
 
 interface ChatComposerProps {
+  executionModes: ChatExecutionModeViewModel[]
   isSubmitting: boolean
   quickPrompts: QuickPromptViewModel[]
+  selectedExecutionMode: ChatExecutionMode
   value: string
   onChange: (value: string) => void
+  onExecutionModeChange: (mode: ChatExecutionMode) => void
   onPromptSelect: (prompt: QuickPromptViewModel) => void
   onSubmit: () => Promise<void>
 }
@@ -13,10 +20,13 @@ interface ChatComposerProps {
  * 채팅 입력과 빠른 프롬프트를 표시한다.
  */
 export function ChatComposer({
+  executionModes,
   isSubmitting,
   quickPrompts,
+  selectedExecutionMode,
   value,
   onChange,
+  onExecutionModeChange,
   onPromptSelect,
   onSubmit,
 }: ChatComposerProps) {
@@ -28,6 +38,19 @@ export function ChatComposer({
         void onSubmit()
       }}
     >
+      <div className="execution-mode-tabs" aria-label="실행 방식">
+        {executionModes.map((mode) => (
+          <button
+            className={selectedExecutionMode === mode.id ? 'active' : ''}
+            disabled={isSubmitting}
+            key={mode.id}
+            onClick={() => onExecutionModeChange(mode.id)}
+            type="button"
+          >
+            {mode.label}
+          </button>
+        ))}
+      </div>
       <div className="quick-prompts" aria-label="빠른 프롬프트">
         {quickPrompts.map((prompt) => (
           <button

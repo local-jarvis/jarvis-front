@@ -34,6 +34,11 @@
 ## API 흐름
 - JSON API는 `fetchJson`으로 호출하고, 204 응답은 `void`로 처리한다.
 - 채팅 전송은 `POST /api/v1/chat` JSON 응답만 사용한다.
+- ChatComposer 실행 방식이 `auto`이면 `POST /api/v1/chat`을 사용해 backend classifier와 세션 저장 흐름을 따른다.
+- ChatComposer 실행 방식이 `stream`이면 `POST /api/v1/chat/stream`을 사용하고 service가 SSE event를 파싱해 hook callback으로 전달한다.
+- ChatComposer 실행 방식이 직접 task이면 `POST /api/v1/task-executions/*`를 사용해 분류와 chat message 저장을 생략하고 지정 task만 실행한다.
+- Streaming chunk는 hook이 pending assistant message에 누적 표시하고, `complete` event 후 저장된 세션 메시지를 다시 조회한다.
+- 직접 task 실행 응답은 hook이 임시 메시지 ViewModel로 표시하고, 리마인더/일정/메모리/activity 목록은 backend source of truth에서 다시 조회한다.
 - LLM 응답을 기다리는 채팅 전송 요청은 프론트 service 경계에서 120초 timeout을 적용한다.
 - Web Push subscription 저장은 service가 수행하지만, `PushManager.subscribe`와 service worker 등록은 browser API라 hook에서 처리한다.
 - Web Push public key는 backend public-key API를 우선 사용하고, 응답이 비활성/누락/실패이면 프론트 내장 fallback key를 사용한다.
@@ -59,3 +64,5 @@
 | 2026-05-11 | backend API를 `localhost:8011`로 연결 | `.codex/ref_docs/specification.md`의 jarvis-back 계약을 사용하기 위해 | mock service 제거, chat/reminder API service 추가 |
 | 2026-05-17 | `.codex/ref_docs/specification.md`의 인증 기반 전체 API 계약을 프론트에 반영 | 로그인부터 리마인더, 일정, 메모리, activity, Web Push까지 사용하기 위해 | `useChatPage`가 인증 워크스페이스 상태를 소유하고 `jarvisApiService`가 모든 endpoint boundary를 담당 |
 | 2026-05-20 | backend host를 `VITE_JARVIS_API_BASE_URL` 환경변수로 관리 | 개발/배포 환경별 backend host 전환을 코드 수정 없이 처리하기 위해 | `jarvis-frontend/.env`와 `.env.example`에 기본 host를 기록하고 service에서 필수 설정으로 검증 |
+| 2026-05-29 | 백엔드 세분화 TaskType과 직접 task 실행 endpoint를 ChatComposer 실행 방식으로 반영 | `REMINDER_CREATE`, `SCHEDULE_QUERY`, `MEMORY_QUERY`, `NEWS_SUMMARY` 같은 backend 계약을 UI에서 명시적으로 호출하기 위해 | `useChatPage`가 실행 방식을 소유하고 `jarvisApiService.executeDirectTask`가 `/task-executions/*` 경계를 담당 |
+| 2026-05-29 | `POST /api/v1/chat/stream`을 ChatComposer stream 실행 방식으로 연결 | 백엔드 SSE 계약을 실제 채팅 UX에서 사용할 수 있게 하기 위해 | `jarvisApiService.streamChatMessage`가 SSE parsing을 담당하고 hook은 chunk를 pending message로 반영 |
